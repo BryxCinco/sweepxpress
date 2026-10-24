@@ -1,0 +1,19 @@
+# Ignore sensitive config file
+config_oauth.php
+vendor/
+.env
+.env.local
+*.log
+node_modules/
+
+# Database dumps (may customer data — huwag i-commit)
+*.sql
+
+# User-uploaded personal photos (personal data)
+uploads/profiles/*
+uploads/admin/*
+!uploads/profiles/.gitkeep
+!uploads/admin/.gitkeep
+
+# Local Composer binary (install Composer separately)
+composers/
