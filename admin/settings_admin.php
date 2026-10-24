@@ -71,13 +71,13 @@ if (isset($_POST['change_password'])) {
     $newpass = $_POST['new_password'] ?? '';
     $confirm = $_POST['confirm_password'] ?? '';
 
-    if (!password_verify($current, $admin['password'])) {
+    if (!password_verify($current, $admin['password_hash'] ?? '')) {
         echo "<script>alert('Incorrect current password.');</script>";
     } elseif ($newpass !== $confirm) {
         echo "<script>alert('Passwords do not match.');</script>";
     } else {
         $hash = password_hash($newpass, PASSWORD_DEFAULT);
-        $stmt = $pdo->prepare("UPDATE users SET password=? WHERE id=?");
+        $stmt = $pdo->prepare("UPDATE users SET password_hash=? WHERE id=?");
         $stmt->execute([$hash, $adminId]);
         echo "<script>alert('Password updated successfully!');location.href='settings_admin.php?tab=general';</script>";
     }

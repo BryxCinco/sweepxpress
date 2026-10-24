@@ -30,7 +30,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ");
                 $update->execute([$token, $expires, $email]);
 
-                $reset_link = "http://localhost/sweepxpress/reset_password.php?token=$token&email=" . urlencode($email);
+                $reset_link = rtrim(env('APP_URL', 'http://localhost/sweepxpress'), '/')
+                    . "/reset_password.php?token=$token&email=" . urlencode($email);
 
                 // Send email
                 $mail->ClearAllRecipients();

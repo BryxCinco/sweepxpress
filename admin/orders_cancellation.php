@@ -33,7 +33,8 @@ function send_cancellation_email($pdo, $recipientEmail, $recipientName, $orderId
         $mail->addBCC(MAIL_USERNAME, 'Admin Team'); // admin copy = mail account
 
         $mail->isHTML(true);
-        $orderLink = "https://www.your-live-domain.com/sweepxpress/order_details.php?id=" . $orderId;
+        $orderLink = rtrim(env('APP_URL', 'http://localhost/sweepxpress'), '/')
+            . "/customers/order_details.php?id=" . (int)$orderId;
         
         if ($action === 'approved') {
             $mail->Subject = 'Order Cancellation Confirmed (Order #' . $orderId . ')';

@@ -50,7 +50,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reply_message'])) {
     $stmt2->execute([$id]);
     $customer = $stmt2->fetch(PDO::FETCH_ASSOC);
 
+    $sent = false;
     if ($customer) {
+        $safeName    = htmlspecialchars($customer['name'], ENT_QUOTES, 'UTF-8');
+        $safeMessage = nl2br(htmlspecialchars($customer['message'], ENT_QUOTES, 'UTF-8'));
+        $safeReply   = nl2br(htmlspecialchars($reply, ENT_QUOTES, 'UTF-8'));
+
         $mail = null;
         try {
             // SMTP settings galing sa includes/email_config.php (.env)
@@ -62,27 +67,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reply_message'])) {
             $mail->isHTML(true);
             $mail->Subject = "Reply from SweepXpress";
             $mail->Body = "<div style='font-family:Arial,sans-serif; line-height:1.6;'>
-                              <p>Hello <strong>{$customer['name']}</strong>,</p>
+                              <p>Hello <strong>{$safeName}</strong>,</p>
                               <p><strong>Your message:</strong></p>
-                              <p style='border-left:3px solid #007bff; padding-left:10px;'>{$customer['message']}</p>
+                              <p style='border-left:3px solid #007bff; padding-left:10px;'>{$safeMessage}</p>
                               <p><strong>Admin reply:</strong></p>
-                              <p style='border-left:3px solid #28a745; padding-left:10px; color:#28a745;'>{$reply}</p>
+                              <p style='border-left:3px solid #28a745; padding-left:10px; color:#28a745;'>{$safeReply}</p>
                               <p>Thank you,<br>SweepXpress Team</p>
                           </div>";
             $mail->send();
+            $sent = true;
         } catch (Throwable $e) {
             $error = $mail ? $mail->ErrorInfo : $e->getMessage();
             error_log("Admin reply email failed: {$error}");
         }
     }
 
+    $alertIcon  = $sent ? 'success' : 'warning';
+    $alertTitle = $sent ? 'Reply Sent!' : 'Reply Saved, Email Not Sent';
+    $alertText  = $sent
+        ? 'Your reply has been successfully sent to the customer.'
+        : 'Your reply was saved, but the email could not be sent. Please check the mail settings and try again.';
+
     echo "<script src='https://cdn.jsdelivr.net/npm/sweetalert2@11'></script>
     <script>
     document.addEventListener('DOMContentLoaded', () => {
       Swal.fire({
-        icon: 'success',
-        title: 'Reply Sent!',
-        text: 'Your reply has been successfully sent to the customer.',
+        icon: '{$alertIcon}',
+        title: '{$alertTitle}',
+        text: '{$alertText}',
         confirmButtonColor: '#2563eb'
       }).then(() => {
         window.location.href = 'admin_contact.php';

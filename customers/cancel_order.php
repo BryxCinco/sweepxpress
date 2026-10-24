@@ -1,8 +1,4 @@
 <?php
-// Enable error reporting (disable on production)
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
 
 // Since this file is in the 'customers' folder, go up one level to find config.php
 require_once __DIR__ . '/../config.php'; // Loads h(), is_logged_in(), and $pdo

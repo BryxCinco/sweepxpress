@@ -15,14 +15,6 @@ if (file_exists($autoloadPath)) {
     require_once $autoloadPath;
 } else {
     error_log("PHPMailer not found. Please run: composer require phpmailer/phpmailer");
-    // Fallback - define a simple mail function
-    function send_otp_email_fallback($recipient_email, $otp_code) {
-        $subject = "SweepXpress: Your One-Time Login Code";
-        $message = "Your OTP is: {$otp_code}. This code will expire in 5 minutes.";
-        $from    = env('MAIL_USERNAME');
-        $headers = $from ? "From: {$from}\r\n" : '';
-        return mail($recipient_email, $subject, $message, $headers);
-    }
 }
 
 /**

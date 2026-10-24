@@ -164,7 +164,7 @@ if (isset($_POST['change_password'])) {
     $newpass = $_POST['new_password'] ?? '';
     $confirm = $_POST['confirm_password'] ?? '';
 
-    if (!password_verify($current, $dbUser['passwordhash'])) {
+    if (!password_verify($current, $dbUser['password_hash'] ?? '')) {
         echo "<script>
             const toast = document.createElement('div');
             toast.className = 'error-toast';
@@ -184,7 +184,7 @@ if (isset($_POST['change_password'])) {
         </script>";
     } else {
         $hash = password_hash($newpass, PASSWORD_DEFAULT);
-        $stmt = $pdo->prepare("UPDATE users SET passwordhash=? WHERE id=?");
+        $stmt = $pdo->prepare("UPDATE users SET password_hash=? WHERE id=?");
         $stmt->execute([$hash, $userId]);
         echo "<script>
             const toast = document.createElement('div');

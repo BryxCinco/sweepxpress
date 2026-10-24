@@ -1,8 +1,5 @@
 <?php
 // E:\xampp\htdocs\sweepxpress\customers\order_details.php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
 
 // ====================================================================
 // 1. CONFIGURATION, AUTHENTICATION, AT VARIABLE SETUP

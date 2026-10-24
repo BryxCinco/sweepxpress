@@ -1,14 +1,6 @@
 <?php
 // NOTE: This file requires the Dompdf library, installed via Composer.
 
-// =======================================================================
-// 🟢 TEMPORARY FIX: ENABLE FULL ERROR REPORTING FOR DEBUGGING 
-// If you see a red screen or text, that text IS the error.
-// =======================================================================
-ini_set('display_errors', 1); 
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL); 
-
 // Paths (Corrected for config.php in project root)
 require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../config.php'; 
