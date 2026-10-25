@@ -17,7 +17,7 @@ try {
 
     if (!empty($missingOrders)) {
         $stmtInsert = $pdo->prepare("INSERT INTO deliveries (order_id, customer_name, address, status, created_at) VALUES (?, ?, ?, 'pending', ?)");
-        $stmtUser   = $pdo->prepare("SELECT firstname, lastname, username FROM users WHERE id = ?");
+        $stmtUser   = $pdo->prepare("SELECT name, username FROM users WHERE id = ?");
 
         foreach ($missingOrders as $order) {
             $finalName = $order['customer_name'];
@@ -25,8 +25,8 @@ try {
                 $stmtUser->execute([$order['user_id']]);
                 $user = $stmtUser->fetch(PDO::FETCH_ASSOC);
                 if ($user) {
-                    if (!empty($user['firstname'])) {
-                        $finalName = $user['firstname'] . ' ' . ($user['lastname'] ?? '');
+                    if (!empty($user['name'])) {
+                        $finalName = $user['name'];
                     } elseif (!empty($user['username'])) {
                         $finalName = $user['username'];
                     }

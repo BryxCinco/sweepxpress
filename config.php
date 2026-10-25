@@ -88,6 +88,30 @@ function h($s) {
 }
 
 // --------------------------------------------------------------------
+// USERNAME GENERATOR (register.php, google_callback.php)
+// --------------------------------------------------------------------
+// Unang salita ng pangalan + 4 random digits, hal. "juan4821".
+// Hindi email prefix para hindi malantad ang email address ng user.
+function generate_username(PDO $pdo, $name) {
+    $first = strtolower(strtok(trim((string)$name), ' ') ?: '');
+    $base  = substr(preg_replace('/[^a-z0-9]/', '', $first), 0, 20);
+    if ($base === '') {
+        $base = 'user';
+    }
+
+    $check = $pdo->prepare("SELECT 1 FROM users WHERE username = ? LIMIT 1");
+    for ($i = 0; $i < 5; $i++) {
+        $candidate = $base . random_int(1000, 9999);
+        $check->execute([$candidate]);
+        if (!$check->fetch()) {
+            return $candidate;
+        }
+    }
+    // Napakabihira: 5 beses nagkapareho, kaya gumamit ng mas mahabang suffix
+    return $base . bin2hex(random_bytes(4));
+}
+
+// --------------------------------------------------------------------
 // SOCIAL LOGIN (GOOGLE & FACEBOOK)
 // --------------------------------------------------------------------
 

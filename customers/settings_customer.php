@@ -99,6 +99,33 @@ if (isset($_POST['update_profile'])) {
         $validationError = true;
     }
 
+    // Username: hindi puwedeng blangko o kapareho ng ibang user
+    // (gumagana kahit wala pang UNIQUE index sa DB; ang index ang huling proteksyon)
+    if (!$validationError) {
+        $usernameError = '';
+        if ($username === '') {
+            $usernameError = 'Username is required';
+        } else {
+            $dup = $pdo->prepare("SELECT 1 FROM users WHERE username = ? AND id <> ? LIMIT 1");
+            $dup->execute([$username, $userId]);
+            if ($dup->fetch()) {
+                $usernameError = 'Username is already taken';
+            }
+        }
+
+        if ($usernameError !== '') {
+            echo "<script>
+                const toast = document.createElement('div');
+                toast.className = 'error-toast';
+                toast.innerHTML = '<i class=\"bi bi-exclamation-circle-fill\"></i> {$usernameError}';
+                document.body.appendChild(toast);
+                setTimeout(() => toast.classList.add('show'), 100);
+                setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3000);
+            </script>";
+            $validationError = true;
+        }
+    }
+
     // Handle profile image upload
     if (!$validationError && !empty($_FILES['profile_image']['name'])) {
         $uploadDir = __DIR__ . '/../uploads/profiles/';
@@ -149,6 +176,16 @@ if (isset($_POST['update_profile'])) {
                     const toast = document.createElement('div');
                     toast.className = 'error-toast';
                     toast.innerHTML = '<i class=\"bi bi-exclamation-circle-fill\"></i> Username is already taken';
+                    document.body.appendChild(toast);
+                    setTimeout(() => toast.classList.add('show'), 100);
+                    setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3000);
+                </script>";
+            } else {
+                error_log("Profile update failed for user {$userId}: " . $e->getMessage());
+                echo "<script>
+                    const toast = document.createElement('div');
+                    toast.className = 'error-toast';
+                    toast.innerHTML = '<i class=\"bi bi-exclamation-circle-fill\"></i> Could not save your profile. Please try again.';
                     document.body.appendChild(toast);
                     setTimeout(() => toast.classList.add('show'), 100);
                     setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3000);

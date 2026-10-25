@@ -457,7 +457,7 @@ $message = preg_replace('/\\*\\*(.*?)\\*\\*/s', '<strong>$1</strong>', $message)
                             </div>
                             <div class="co-form-group">
                                 <label class="co-label co-label-required">Phone Number</label>
-                                <input type="tel" name="contact_number" class="co-input" required value="<?= h($_POST['contact_number'] ?? ($_SESSION['user']['phone_number'] ?? '')) ?>" pattern="^\+?\d[\d\s\(\)-]{6,20}\d$" placeholder="e.g., 09171234567" <?= $disabled_attr ?>>
+                                <input type="tel" name="contact_number" class="co-input" required value="<?= h($_POST['contact_number'] ?? ($_SESSION['user']['phone'] ?? '')) ?>" pattern="^\+?\d[\d\s\(\)-]{6,20}\d$" placeholder="e.g., 09171234567" <?= $disabled_attr ?>>
                                 <div class="co-helper">We'll use this to contact you for delivery.</div>
                             </div>
                             <div class="co-form-group">

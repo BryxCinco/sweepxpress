@@ -70,7 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['email']) && !isset($_
                     $msg = "Your account is suspended until $expiry_date";
                 } else {
                     // Generate OTP
-                    $otp = rand(100000, 999999);
+                    $otp = random_int(100000, 999999);
                     $stmt_otp = $pdo->prepare("UPDATE users SET otp_code=?, otp_expires=DATE_ADD(NOW(), INTERVAL 5 MINUTE), otp_last_sent=NOW() WHERE id=?");
                     $stmt_otp->execute([(string)$otp, $user['id']]);
 
@@ -114,7 +114,7 @@ if (isset($_POST['verify_otp'])) {
             $login_error = "Please enter the full 6-digit OTP code.";
         } else {
             try {
-                $stmt = $pdo->prepare("SELECT id, name, role, email, otp_code, otp_expires FROM users WHERE id=? LIMIT 1");
+                $stmt = $pdo->prepare("SELECT id, name, username, profile_image, phone, role, email, otp_code, otp_expires FROM users WHERE id=? LIMIT 1");
                 $stmt->execute([$uid]);
                 $u = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -129,6 +129,9 @@ if (isset($_POST['verify_otp'])) {
                         $_SESSION['user'] = [
                             'id' => $u['id'],
                             'name' => $u['name'],
+                            'username' => $u['username'] ?? '',
+                            'profile_image' => $u['profile_image'] ?? null,
+                            'phone' => $u['phone'] ?? '',
                             'role' => $u['role'],
                             'email' => $u['email']
                         ];
@@ -188,7 +191,7 @@ if (isset($_POST['resend_otp'])) {
                 $stmt_email->execute([$uid]);
                 $e_data = $stmt_email->fetch(PDO::FETCH_ASSOC);
                 $email_to_send = $e_data['email'] ?? null;
-                $otp = rand(100000, 999999);
+                $otp = random_int(100000, 999999);
 
                 $pdo->prepare("UPDATE users SET otp_code=?, otp_expires=DATE_ADD(NOW(), INTERVAL 5 MINUTE), otp_last_sent=NOW() WHERE id=?")
                     ->execute([(string)$otp, $uid]);

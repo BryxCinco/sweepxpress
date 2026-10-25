@@ -125,12 +125,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $role  = $pending_data['role'];
 
                 try {
+                    $username = generate_username($pdo, $pending_data['first_name'] ?? $name);
+
                     // Insert into database - ITO NA ANG FINAL STEP
                     $stmt = $pdo->prepare("
-                        INSERT INTO users (name, email, password_hash, role, is_verified)
-                        VALUES (?, ?, ?, ?, 1)
+                        INSERT INTO users (name, username, email, password_hash, role, is_verified)
+                        VALUES (?, ?, ?, ?, ?, 1)
                     ");
-                    $stmt->execute([$name, $email, $hash, $role]);
+                    $stmt->execute([$name, $username, $email, $hash, $role]);
                     $new_user_id = $pdo->lastInsertId();
 
                     // Clear pending session
@@ -138,10 +140,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     // AUTO LOGIN
                     $_SESSION['user'] = [
-                        'id'    => $new_user_id,
-                        'name'  => $name,
-                        'email' => $email,
-                        'role'  => $role
+                        'id'       => $new_user_id,
+                        'name'     => $name,
+                        'username' => $username,
+                        'email'    => $email,
+                        'role'     => $role
                     ];
 
                     // Redirect to homepage

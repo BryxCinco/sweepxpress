@@ -64,6 +64,9 @@ if ($existingUser) {
     $_SESSION['user'] = [
         'id'        => $existingUser['id'],
         'name'      => $name, // Gagamitin ang pangalan mula sa Google
+        'username'  => $existingUser['username'] ?? '',
+        'profile_image' => $existingUser['profile_image'] ?? null,
+        'phone'     => $existingUser['phone'] ?? '',
         'email'     => $existingUser['email'],
         'google_id' => $google_id,
         'role'      => $existingUser['role']
@@ -74,20 +77,24 @@ if ($existingUser) {
         $redirectUrl = "/sweepxpress/admin/dashboard.php";
     }
 } else {
-    // New user, insert into database with default 'user' role
-    $role = 'user';
-    $stmt = $pdo->prepare("INSERT INTO users (name, email, google_id, role) VALUES (?, ?, ?, ?)");
-    $stmt->execute([$name, $email, $google_id, $role]);
+    // New user, insert into database with default 'customer' role
+    // ('user' ay wala sa role enum: customer/admin/business)
+    $role = 'customer';
+    $username = generate_username($pdo, $name);
+    // Walang password ang Google user; '' para pumasa sa NOT NULL (password_verify('', ...) ay laging false)
+    $stmt = $pdo->prepare("INSERT INTO users (name, username, email, password_hash, google_id, role) VALUES (?, ?, ?, '', ?, ?)");
+    $stmt->execute([$name, $username, $email, $google_id, $role]);
     $newUserId = $pdo->lastInsertId();
 
     $_SESSION['user'] = [
         'id'        => $newUserId,
         'name'      => $name, // Gagamitin ang pangalan galing sa Google
+        'username'  => $username,
         'email'     => $email,
         'google_id' => $google_id,
         'role'      => $role
     ];
-    // No need to check for admin role here as new users default to 'user'
+    // No need to check for admin role here as new users default to 'customer'
 }
 
 // Redirect based on the determined URL
