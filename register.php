@@ -595,7 +595,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         /* Social Buttons - Fixed Spacing & Size */
         .social-buttons {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr; /* Google lang muna (naka-disable ang Facebook) */
             gap: 1rem;
             margin-bottom: 2rem;
         }
@@ -938,14 +938,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div class="divider">or sign up with</div>
 
             <div class="social-buttons">
-                <button type="button" class="btn-social btn-google">
+                <a href="/sweepxpress/google_login.php" class="btn-social btn-google">
                     <i class="bi bi-google"></i>
                     <span>Google</span>
-                </button>
-                <button type="button" class="btn-social btn-facebook">
-                    <i class="bi bi-facebook"></i>
-                    <span>Facebook</span>
-                </button>
+                </a>
             </div>
 
             <p class="login-text">

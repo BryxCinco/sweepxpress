@@ -20,12 +20,7 @@ if (!is_logged_in()) {
     $user_name = $_SESSION['user']['name'] ?? '';
 }
 
-// Ensure user_seen column exists
-try {
-    $pdo->query("SELECT user_seen FROM contact_messages LIMIT 1");
-} catch (PDOException $e) {
-    $pdo->exec("ALTER TABLE contact_messages ADD COLUMN user_seen TINYINT(1) DEFAULT 0");
-}
+// user_seen column: tingnan ang database/migrations/2026-10-27_4c_contact_user_seen.sql
 
 // Handle AJAX delete
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_delete'])) {

@@ -1,11 +1,5 @@
 <?php
-require_once __DIR__ . '/../config.php';
-require_once __DIR__ . '/../includes/auth.php';
-
-if (!function_exists('is_admin') || !is_admin()) {
-    header("Location: /sweepxpress/login.php");
-    exit;
-}
+require_once __DIR__ . '/admin_auth.php';
 require_once __DIR__ . '/../includes/header.php';
 
 // ====================================================================

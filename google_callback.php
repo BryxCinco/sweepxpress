@@ -35,7 +35,7 @@ if (!isset($_GET['code'])) {
         $name       = $userData['name'] ?? '';
 
         if (!$google_id && !$email) {
-            die('Google did not return a valid user ID or email.');
+            die('Sign-in with Google failed. Please try again or use email login.');
         }
 
         // Check if user already exists in your database
@@ -101,6 +101,7 @@ if ($existingUser) {
 header("Location: " . $redirectUrl);
 exit;
     } catch (Exception $e) {
-        die('Failed to authenticate with Google: ' . $e->getMessage());
+        error_log('Google sign-in failed: ' . $e->getMessage());
+        die('Sign-in with Google failed. Please try again or use email login.');
     }
 }

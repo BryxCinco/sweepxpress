@@ -555,7 +555,7 @@ if (isset($_POST['resend_otp'])) {
         /* Social Buttons */
         .social-buttons {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr; /* Google lang muna (naka-disable ang Facebook) */
             gap: 0.75rem;
             margin-bottom: 1.25rem;
         }
@@ -816,10 +816,6 @@ if (isset($_POST['resend_otp'])) {
                         <a href="google_login.php" class="btn-social btn-google">
                             <svg viewBox="0 0 24 24"><!-- Google SVG --></svg>
                             <span>Google</span>
-                        </a>
-                        <a href="facebook_login.php" class="btn-social btn-facebook">
-                            <i class="bi bi-facebook"></i>
-                            <span>Facebook</span>
                         </a>
                     </div>
                     <div class="signup-text">Don't have an account? <a href="/sweepxpress/register.php">Sign Up</a></div>
