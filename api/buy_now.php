@@ -5,6 +5,16 @@ require_once __DIR__ . '/../config.php';
 // Force JSON response
 header('Content-Type: application/json');
 
+// Login required — kapareho ng buy_now_checkout.php
+if (!is_logged_in()) {
+    echo json_encode([
+        'status'   => 'error',
+        'message'  => 'Please log in to continue with Buy Now.',
+        'redirect' => '/sweepxpress/login.php'
+    ]);
+    exit;
+}
+
 // Check POST input
 if (!isset($_POST['product_id'])) {
     echo json_encode(['status' => 'error', 'message' => 'Product ID is required']);

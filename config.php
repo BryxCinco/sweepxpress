@@ -112,6 +112,62 @@ function generate_username(PDO $pdo, $name) {
 }
 
 // --------------------------------------------------------------------
+// SPAM GUARD (honeypot + time trap) — register.php, contact.php
+// --------------------------------------------------------------------
+// Tawagin sa pag-render ng form: naglalabas ng nakatagong honeypot field
+// at itinatala sa session kung kailan binuksan ang form.
+function spam_guard_field($form) {
+    $_SESSION['spam_guard'][$form] = time();
+    return '<div style="position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden;" aria-hidden="true">'
+         . '<label>Leave this field empty <input type="text" name="website" value="" tabindex="-1" autocomplete="off"></label>'
+         . '</div>';
+}
+
+// Tawagin sa POST: true kapag mukhang bot — napunan ang honeypot,
+// walang record na binuksan ang form, o na-submit nang wala pang $min_seconds.
+function spam_guard_failed($form, $min_seconds = 3) {
+    $opened = $_SESSION['spam_guard'][$form] ?? 0;
+    return ($_POST['website'] ?? '') !== ''
+        || $opened === 0
+        || time() - $opened < $min_seconds;
+}
+
+// --------------------------------------------------------------------
+// RATE LIMIT (rate_limits table) — register, login, contact, forgot password
+// --------------------------------------------------------------------
+// REMOTE_ADDR lang ang pinagkakatiwalaan; madaling pekein ang X-Forwarded-For.
+function client_ip() {
+    return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+}
+
+// true kapag naabot na ang $max na attempt sa huling $seconds (hindi nagtatala).
+// Kapag may DB error (hal. wala pang table sa server), hinahayaan ang request.
+function rate_limited(PDO $pdo, $action, $max, $seconds, $key = null) {
+    try {
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM rate_limits WHERE action = ? AND rl_key = ? AND created_at > ?");
+        $stmt->execute([$action, substr((string)($key ?? client_ip()), 0, 64), date('Y-m-d H:i:s', time() - $seconds)]);
+        return (int)$stmt->fetchColumn() >= $max;
+    } catch (PDOException $e) {
+        error_log("rate_limited failed: " . $e->getMessage());
+        return false;
+    }
+}
+
+// Nagtatala ng isang attempt. Mga 1 sa 100 tawag, binubura ang rows na lampas 24 oras.
+function rate_limit_record(PDO $pdo, $action, $key = null) {
+    try {
+        $pdo->prepare("INSERT INTO rate_limits (action, rl_key, created_at) VALUES (?, ?, ?)")
+            ->execute([$action, substr((string)($key ?? client_ip()), 0, 64), date('Y-m-d H:i:s')]);
+        if (random_int(1, 100) === 1) {
+            $pdo->prepare("DELETE FROM rate_limits WHERE created_at < ?")
+                ->execute([date('Y-m-d H:i:s', time() - 86400)]);
+        }
+    } catch (PDOException $e) {
+        error_log("rate_limit_record failed: " . $e->getMessage());
+    }
+}
+
+// --------------------------------------------------------------------
 // SOCIAL LOGIN (GOOGLE & FACEBOOK)
 // --------------------------------------------------------------------
 

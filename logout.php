@@ -15,15 +15,8 @@ $redirect_url = '/sweepxpress/index.php';
 if (isset($_SESSION['user']) && is_array($_SESSION['user'])) {
     // Assuming the 'role' key exists in the $_SESSION['user'] array
     if (($_SESSION['user']['role'] ?? '') === 'admin') {
-        // If the user is an admin, redirect them to the admin login page
-        // Note: The admin_login.php path might need adjustment based on where this file is located.
-        // I am assuming admin_login.php is at '/sweepxpress/admin/admin_login.php' or similar 
-        // if your current logout is in the root of sweepxpress, but based on your upload,
-        // it seems admin_login.php is in the same directory as login.php. 
-        // I will use a path relative to /sweepxpress/
-        $redirect_url = '/sweepxpress/admin/admin_login.php'; 
-        // If admin_login.php is inside an 'admin' folder, you might need this instead:
-        // $redirect_url = '/sweepxpress/admin/admin_login.php'; 
+        // Admin → bumalik sa iisang login page (may OTP at rate limit)
+        $redirect_url = '/sweepxpress/login.php';
     }
 }
 

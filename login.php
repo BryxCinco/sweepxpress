@@ -16,7 +16,7 @@ $show_otp = false;
 
 // Redirect if already logged in
 if (isset($_SESSION['user'])) {
-    header("Location: /sweepxpress/index.php");
+    header("Location: " . (is_admin() ? "/sweepxpress/admin/dashboard.php" : "/sweepxpress/index.php"));
     exit;
 }
 
@@ -56,8 +56,13 @@ if (isset($_GET['action']) && $_GET['action'] === 'back_to_login') {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['email']) && !isset($_POST['verify_otp']) && !isset($_POST['resend_otp'])) {
     $email = trim($_POST['email']);
     $pass = trim($_POST['password']);
+    // Key para sa per-account limit: hash ng email, hindi ang email mismo
+    $emailKey = hash('sha256', strtolower($email));
 
-    if ($email && $pass) {
+    if ($email && $pass && (rate_limited($pdo, 'login_fail_ip', 20, 900)
+                         || rate_limited($pdo, 'login_fail_email', 10, 900, $emailKey))) {
+        $msg = "Too many login attempts. Please try again in 15 minutes.";
+    } elseif ($email && $pass) {
         try {
             $stmt = $pdo->prepare("SELECT id, name, role, email, password_hash, suspended_until FROM users WHERE email=? LIMIT 1");
             $stmt->execute([$email]);
@@ -86,6 +91,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['email']) && !isset($_
                     }
                 }
             } else {
+                // Maling email/password lang ang binibilang (hindi ang matagumpay na login)
+                rate_limit_record($pdo, 'login_fail_ip');
+                rate_limit_record($pdo, 'login_fail_email', $emailKey);
                 $msg = "Invalid email or password.";
             }
         } catch (Exception $e) {
@@ -136,7 +144,8 @@ if (isset($_POST['verify_otp'])) {
                             'email' => $u['email']
                         ];
 
-                        header("Location: /sweepxpress/index.php");
+                        // Admin → dashboard; lahat ng iba → homepage
+                        header("Location: " . ($u['role'] === 'admin' ? "/sweepxpress/admin/dashboard.php" : "/sweepxpress/index.php"));
                         exit;
                     } else {
                         $login_error = "OTP expired. Please log in again.";

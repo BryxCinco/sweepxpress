@@ -35,6 +35,12 @@ function handleResendOtp(&$msg, &$success_message) {
         return false;
     }
 
+    if (rate_limited($pdo, 'register_otp', 5, 3600)) {
+        $msg = "Too many verification requests. Please try again later.";
+        return false;
+    }
+    rate_limit_record($pdo, 'register_otp');
+
     // Generate new OTP
     $new_otp = str_pad(random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
     $new_expiry_time = time() + (OTP_EXPIRY_MINUTES * 60);
@@ -185,7 +191,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         // Required fields and terms check
-        if (!$first_name || !$last_name || !$email || !$pass) {
+        // Spam guard muna: honeypot / walang record / masyadong mabilis
+        if (spam_guard_failed('register')) {
+            $msg = "Something went wrong. Please try again.";
+        } else if (!$first_name || !$last_name || !$email || !$pass) {
             $msg = "All fields are required.";
         } else if (!$agreeTerms) {
             $msg = "You must agree to the Terms & Conditions and Privacy Policy.";
@@ -215,7 +224,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 if ($stmt->fetch()) {
                     $msg = "Email already registered.";
+                } elseif (rate_limited($pdo, 'register_otp', 5, 3600)) {
+                    // Max 5 OTP email kada IP kada oras (unang send + resend)
+                    $msg = "Too many verification requests. Please try again later.";
                 } else {
+                    rate_limit_record($pdo, 'register_otp');
 
                     // Hash password
                     $hash = password_hash($pass, PASSWORD_DEFAULT);
@@ -856,6 +869,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <p class="text-center text-muted">Join us and start shopping today</p>
 
         <form action="" method="POST" id="mainRegistrationForm">
+            <?= spam_guard_field('register') ?>
             <?php $prev_data = $_SESSION['reg_pending'] ?? []; // For repopulating data if they go back ?>
             <div class="row">
                 <div class="col-6 mb-3">

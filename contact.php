@@ -48,7 +48,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['message']) && !isset(
         echo "<div class='alert alert-danger mt-4'>⚠️ You must be logged in to send a message.</div>";
     } else {
         $message = trim($_POST['message']);
-        if (!empty($message)) {
+        if (spam_guard_failed('contact')) {
+            echo "<div class='alert alert-danger mt-4'>⚠️ Your message could not be sent. Please try again.</div>";
+        } elseif (rate_limited($pdo, 'contact', 5, 3600, 'user:' . $_SESSION['user']['id'])) {
+            // Max 5 message kada user kada oras (bawat isa ay nag-e-email sa admin)
+            echo "<div class='alert alert-danger mt-4'>⚠️ You've sent several messages recently. Please wait a while before sending another.</div>";
+        } elseif (mb_strlen($message) > 2000) {
+            echo "<div class='alert alert-danger mt-4'>⚠️ Your message is too long (max 2000 characters).</div>";
+        } elseif (!empty($message)) {
+            rate_limit_record($pdo, 'contact', 'user:' . $_SESSION['user']['id']);
             $stmt = $pdo->prepare("INSERT INTO contact_messages (name, email, message, created_at) VALUES (?, ?, ?, NOW())");
             $stmt->execute([$user_name, $user_email, $message]);
 
@@ -61,8 +69,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['message']) && !isset(
 
                 $mail->isHTML(true);
                 $mail->Subject = 'New Contact Message from ' . $user_name;
-                $mail->Body    = "<p><strong>Name:</strong> {$user_name}</p>
-                                  <p><strong>Email:</strong> {$user_email}</p>
+                $mail->Body    = "<p><strong>Name:</strong> " . h($user_name) . "</p>
+                                  <p><strong>Email:</strong> " . h($user_email) . "</p>
                                   <p><strong>Message:</strong><br>" . nl2br(htmlspecialchars($message)) . "</p>";
 
                 $mail->send();
@@ -540,6 +548,7 @@ if (is_logged_in()) {
         <div class="contact-card">
             <div class="card-body">
                 <form method="post" action="" id="contactForm">
+                    <?= spam_guard_field('contact') ?>
                     <div class="form-field">
                         <label class="field-label">Name</label>
                         <input type="text" class="field-input" value="<?= htmlspecialchars($user_name ?? 'Guest') ?>" disabled />
@@ -552,7 +561,7 @@ if (is_logged_in()) {
 
                     <div class="form-field">
                         <label class="field-label">Your Message</label>
-                        <textarea class="field-textarea" name="message" placeholder="Describe your question or concern..." required></textarea>
+                        <textarea class="field-textarea" name="message" placeholder="Describe your question or concern..." maxlength="2000" required></textarea>
                     </div>
 
                     <div class="form-actions">

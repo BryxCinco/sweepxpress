@@ -1030,6 +1030,8 @@ function buyNow(productId) {
                 icon: 'error',
                 title: 'Error',
                 text: data.message
+            }).then(() => {
+                if (data.redirect) window.location.href = data.redirect;
             });
         }
     })

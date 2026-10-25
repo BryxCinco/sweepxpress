@@ -21,8 +21,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // 1 oras ang validity ng token, kaya kung > 59 min pa ang natitira, kakapadala lang.
         $recentlySent = $user && !empty($user['reset_token_expiry'])
             && strtotime($user['reset_token_expiry']) - time() > 3540;
+        // Rate limit kada IP: max 10 reset email kada oras (kahit iba-ibang email)
+        $ipLimited = rate_limited($pdo, 'forgot_ip', 10, 3600);
 
-        if ($user && !$recentlySent) {
+        if ($user && !$recentlySent && !$ipLimited) {
+            rate_limit_record($pdo, 'forgot_ip');
             try {
                 $token = bin2hex(random_bytes(32));
                 $expires = date("Y-m-d H:i:s", strtotime('+1 hour'));

@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/includes/auth.php'; // login required (gaya ng checkout.php)
 // Sa checkout.php at buy_now_checkout.php:
 
 // ...
@@ -192,13 +193,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // =======================================
 
                 $customer_name  = $name; 
-                $customer_email = $_POST['email'] ?? ($_SESSION['user']['email'] ?? '');
+                // Email galing lang sa session — hindi puwedeng pumili ng ibang padadalhan
+                $customer_email = $_SESSION['user']['email'] ?? '';
+                $safe_name      = h($customer_name);
 
                 if ($customer_email) {
                     $subject = "Your Order #$order_id Has Been Placed!";
                     $body = "
                         <h2>Thank you for your order!</h2>
-                        <p>Hello <b>$customer_name</b>,</p>
+                        <p>Hello <b>$safe_name</b>,</p>
                         <p>Your order has been successfully placed and is now pending.</p>
                         <p><b>Order ID:</b> $order_id</p>
                         <p>Total: <b>₱" . number_format($final_total, 2) . "</b></p>

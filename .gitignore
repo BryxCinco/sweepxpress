@@ -8,6 +8,8 @@ node_modules/
 
 # Database dumps (may customer data — huwag i-commit)
 *.sql
+# Exception: schema migrations lang (walang customer data)
+!database/migrations/*.sql
 
 # User-uploaded personal photos (personal data)
 uploads/profiles/*
