@@ -77,6 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['email']) && !isset($_
                     if (send_otp_email($user['email'], $otp) === true) {
                         $_SESSION['pending_user_id'] = $user['id'];
                         $_SESSION['otp_last_sent'] = time();
+                        $_SESSION['otp_attempts'] = 0;
                         $show_otp = true;
                         $success = "OTP sent to your email. It will expire in 5 minutes.";
                     } else {
@@ -124,7 +125,7 @@ if (isset($_POST['verify_otp'])) {
                     if (strtotime($u['otp_expires']) > time()) {
                         $pdo->prepare("UPDATE users SET otp_code=NULL, otp_expires=NULL, otp_last_sent=NULL WHERE id=?")->execute([$uid]);
 
-                        unset($_SESSION['pending_user_id'], $_SESSION['otp_last_sent']);
+                        unset($_SESSION['pending_user_id'], $_SESSION['otp_last_sent'], $_SESSION['otp_attempts']);
                         $_SESSION['user'] = [
                             'id' => $u['id'],
                             'name' => $u['name'],
@@ -141,7 +142,15 @@ if (isset($_POST['verify_otp'])) {
                         $show_otp = false;
                     }
                 } else {
-                    $login_error = "Incorrect OTP. Try again or resend.";
+                    $_SESSION['otp_attempts'] = ($_SESSION['otp_attempts'] ?? 0) + 1;
+                    if ($_SESSION['otp_attempts'] >= 5) {
+                        $pdo->prepare("UPDATE users SET otp_code=NULL, otp_expires=NULL WHERE id=?")->execute([$uid]);
+                        unset($_SESSION['pending_user_id'], $_SESSION['otp_last_sent'], $_SESSION['otp_attempts']);
+                        $show_otp = false;
+                        $login_error = "Too many incorrect attempts. Please log in again.";
+                    } else {
+                        $login_error = "Incorrect OTP. Try again or resend.";
+                    }
                 }
             } catch (Exception $e) {
                 logError($e->getMessage());
@@ -186,6 +195,7 @@ if (isset($_POST['resend_otp'])) {
 
                 if ($email_to_send && send_otp_email($email_to_send, $otp) === true) {
                     $_SESSION['otp_last_sent'] = time();
+                    $_SESSION['otp_attempts'] = 0;
                     $success = "A new OTP has been sent. Check inbox/spam. It will expire in 5 minutes.";
                 } else {
                     $login_error = "Failed to resend OTP. Contact support.";

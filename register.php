@@ -28,7 +28,13 @@ function handleResendOtp(&$msg, &$success_message) {
     }
     
     $pending_data = $_SESSION['reg_pending'];
-    
+
+    $wait = 60 - (time() - ($pending_data['last_sent'] ?? 0));
+    if ($wait > 0) {
+        $msg = "Please wait {$wait} seconds before requesting a new code.";
+        return false;
+    }
+
     // Generate new OTP
     $new_otp = str_pad(random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
     $new_expiry_time = time() + (OTP_EXPIRY_MINUTES * 60);
@@ -41,6 +47,7 @@ function handleResendOtp(&$msg, &$success_message) {
         // Update session data with new OTP and expiry
         $_SESSION['reg_pending']['otp'] = $new_otp;
         $_SESSION['reg_pending']['expiry_time'] = $new_expiry_time;
+        $_SESSION['reg_pending']['last_sent'] = time();
         
         $success_message = "A new 6-digit verification code has been successfully sent to **" . htmlspecialchars($pending_data['email']) . "**. The code expires in " . OTP_EXPIRY_MINUTES . " minutes.";
         return true;
@@ -227,6 +234,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'role'          => $role,
                             'otp'           => $otp,
                             'expiry_time'   => $expiry_time,
+                            'last_sent'     => time(),
                             // Store other form values to repopulate if the user goes back
                             'first_name'    => $first_name,
                             'last_name'     => $last_name,

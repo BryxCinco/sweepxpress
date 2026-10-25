@@ -13,11 +13,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $message = '<div class="alert alert-danger text-center">Please enter a valid email address.</div>';
     } else {
-        $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ? LIMIT 1");
+        $stmt = $pdo->prepare("SELECT id, reset_token_expiry FROM users WHERE email = ? LIMIT 1");
         $stmt->execute([$email]);
         $user = $stmt->fetch();
 
-        if ($user) {
+        // Rate limit: isang reset email lang kada 60 segundo bawat email.
+        // 1 oras ang validity ng token, kaya kung > 59 min pa ang natitira, kakapadala lang.
+        $recentlySent = $user && !empty($user['reset_token_expiry'])
+            && strtotime($user['reset_token_expiry']) - time() > 3540;
+
+        if ($user && !$recentlySent) {
             try {
                 $token = bin2hex(random_bytes(32));
                 $expires = date("Y-m-d H:i:s", strtotime('+1 hour'));
