@@ -43,11 +43,18 @@ if (isset($_POST['update_profile'])) {
             mkdir($uploadDir, 0777, true);
         }
 
-        $newFile    = time() . '_' . basename($_FILES['profile_image']['name']);
-        $uploadFile = $uploadDir . $newFile;
+        // Larawan lang (gaya ng settings_customer.php); bagong random na pangalan,
+        // hindi ang orihinal na filename ng nag-upload.
+        $extension = strtolower(pathinfo($_FILES['profile_image']['name'], PATHINFO_EXTENSION));
+        $allowed   = ['jpg', 'jpeg', 'png'];
 
-        if (move_uploaded_file($_FILES['profile_image']['tmp_name'], $uploadFile)) {
-            $profile_image = "/sweepxpress/uploads/admin/" . $newFile;
+        if (in_array($extension, $allowed) && getimagesize($_FILES['profile_image']['tmp_name']) !== false) {
+            $newFile    = time() . '_' . md5(uniqid()) . '.' . $extension;
+            $uploadFile = $uploadDir . $newFile;
+
+            if (move_uploaded_file($_FILES['profile_image']['tmp_name'], $uploadFile)) {
+                $profile_image = "/sweepxpress/uploads/admin/" . $newFile;
+            }
         }
     }
 

@@ -1,0 +1,18 @@
+# ====================================================================
+# uploads/ — mga larawan lang ang puwedeng i-serve dito.
+# Kahit may makapag-upload ng .php (o ibang script), hindi ito
+# mapapatakbo o mada-download. Sakop din ang uploads/profiles/ at uploads/admin/.
+# ====================================================================
+
+# Harangin ang lahat ng file...
+Require all denied
+
+# ...maliban sa mga larawan
+<FilesMatch "\.(jpe?g|jfif|png|gif|webp)$">
+    Require all granted
+</FilesMatch>
+
+# Dagdag na proteksyon: patayin ang PHP engine sa folder na ito (kung mod_php)
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>

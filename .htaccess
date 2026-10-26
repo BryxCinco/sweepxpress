@@ -1,0 +1,23 @@
+# ====================================================================
+# SweepXpress — harangin ang mga sensitibong file at folder sa web
+# (Apache 2.4: XAMPP at karamihan ng shared hosting)
+# ====================================================================
+
+# Walang directory listing (hal. /uploads/ ay hindi maglilista ng files)
+Options -Indexes
+
+# Mga dotfile: .env, .env.example, .gitignore, .htaccess, .git, atbp.
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+
+# Mga file na hindi dapat ma-download: DB dumps, composer files, docs, logs, backups
+<FilesMatch "\.(sql|json|lock|md|log|bak|ini|sh)$">
+    Require all denied
+</FilesMatch>
+
+# Mga folder na pang-server lang: walang dapat ma-access sa web
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(\.git|vendor|database|composers|node_modules)(/|$) - [F,L]
+</IfModule>

@@ -35,10 +35,13 @@ if (!isset($_SESSION['cart']) || !is_array($_SESSION['cart'])) {
 // --------------------------------------------------------------------
 // DATABASE CONNECTION SETTINGS
 // --------------------------------------------------------------------
-$DB_HOST = 'localhost';
-$DB_NAME = 'sweepxpress_db';
-$DB_USER = 'root';
-$DB_PASS = ''; // default XAMPP has empty password
+// Galing sa .env (DB_HOST, DB_NAME, DB_USER, DB_PASS). Kapag wala sa .env,
+// default ng local XAMPP ang gagamitin, kaya gumagana pa rin ang local nang walang binabago.
+require_once __DIR__ . '/includes/env_loader.php';
+$DB_HOST = env('DB_HOST', 'localhost');
+$DB_NAME = env('DB_NAME', 'sweepxpress_db');
+$DB_USER = env('DB_USER', 'root');
+$DB_PASS = env('DB_PASS', ''); // default XAMPP: walang password
 
 try {
     $pdo = new PDO(
