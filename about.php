@@ -206,7 +206,7 @@ if (!function_exists('h')) {
         </div>
 
         <aside class="ab-panel" aria-label="Catalog at a glance">
-            <span class="sx-logo-mark" aria-hidden="true">X</span>
+            <span class="sx-logo-mark" aria-hidden="true"><img src="/sweepxpress/assets/brand/logo-256.png" alt=""></span>
             <div>
                 <p class="ab-panel-title">Our catalog today</p>
                 <p class="ab-panel-text">Live numbers from our store.</p>

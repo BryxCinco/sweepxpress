@@ -3,6 +3,14 @@
 // at "related products" (product.php). Styles: .store-card sa assets/style.css.
 // Kailangan ng row na may id, name, price, category, description, image_path, stock_quantity.
 
+if (!function_exists('sx_compact_number')) {
+    // 1302 → "1.3k", 164 → "164" (gaya ng Shopee)
+    function sx_compact_number(int $n): string
+    {
+        return $n >= 1000 ? rtrim(rtrim(number_format($n / 1000, 1), '0'), '.') . 'k' : (string) $n;
+    }
+}
+
 if (!function_exists('sx_product_card')) {
     function sx_product_card(array $p, bool $isLoggedIn): void
     {
@@ -40,7 +48,12 @@ if (!function_exists('sx_product_card')) {
                 </h3>
                 <p class="store-card-desc"><?php echo htmlspecialchars($p['description'] ?? '', ENT_QUOTES, 'UTF-8'); ?></p>
                 <div class="store-card-foot">
-                    <span class="store-price">₱<?php echo number_format((float) $p['price'], 2); ?></span>
+                    <div class="store-price-wrap">
+                        <span class="store-price">₱<?php echo number_format((float) $p['price'], 2); ?></span>
+                        <?php if (!empty($p['sold'])): // "N sold" — galing sa index.php (hindi kasama ang cancelled) ?>
+                            <span class="store-sold"><?php echo sx_compact_number((int) $p['sold']); ?> sold</span>
+                        <?php endif; ?>
+                    </div>
                     <?php if (!$isInStock): ?>
                         <button type="button" class="store-add" disabled aria-label="Out of stock"><i class="fa-solid fa-ban"></i></button>
                     <?php elseif ($isLoggedIn): ?>

@@ -53,7 +53,7 @@ if (is_admin()) {
     <!-- Brand + close -->
     <div class="sidebar-head">
         <a href="<?= is_admin() ? '/sweepxpress/admin/dashboard.php' : '/sweepxpress/index.php' ?>" class="sidebar-brand">
-            <span class="sx-logo-mark" aria-hidden="true">X</span>
+            <span class="sx-logo-mark" aria-hidden="true"><img src="/sweepxpress/assets/brand/logo-256.png" alt=""></span>
             <span class="sx-wordmark">Sweep<span class="sx-wordmark-x">X</span>press</span>
         </a>
         <button class="sidebar-close" id="closeSidebar" type="button" aria-label="Close sidebar">

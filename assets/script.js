@@ -96,6 +96,21 @@ function sxLazyImages(scope = document) {
     images.forEach((img) => observer.observe(img));
 }
 
+// POST na may 15s timeout; error kapag hindi JSON ang sagot (hal. error page ng hosting)
+function sxPostJson(url, body, timeoutMs = 15000) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    return fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+        signal: ctrl.signal,
+        credentials: 'same-origin',
+    })
+        .then((res) => { if (!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
+        .finally(() => clearTimeout(timer));
+}
+
 /* -------------------------------
    Add to cart (product cards, product page)
    "sx" prefix: hiwalay sa lumang addToCart() sa itaas
@@ -106,12 +121,7 @@ function sxAddToCart(productId, btn) {
     if (btn) { btn.disabled = true; btn.classList.add('is-busy'); }
     if (icon) icon.className = 'fa-solid fa-spinner';
 
-    fetch(`${window.location.origin}/sweepxpress/api/add_to_cart.php`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `product_id=${encodeURIComponent(productId)}`,
-    })
-        .then((res) => res.json())
+    sxPostJson('/sweepxpress/api/add_to_cart.php', `product_id=${encodeURIComponent(productId)}`)
         .then((data) => {
             if (data.success) {
                 if (typeof updateCartBadge === 'function') updateCartBadge(data.count);
@@ -121,8 +131,8 @@ function sxAddToCart(productId, btn) {
             }
         })
         .catch((err) => {
-            console.error('Error:', err);
-            sxToast('Failed to add to cart', 'error');
+            console.error('Add to cart:', err);
+            sxToast(err.name === 'AbortError' ? 'Server is slow — please try again' : 'Failed to add to cart', 'error');
         })
         .finally(() => {
             if (btn) { btn.disabled = false; btn.classList.remove('is-busy'); }
@@ -137,12 +147,7 @@ function sxAddToCart(productId, btn) {
 function sxBuyNow(productId, btn) {
     if (btn) btn.disabled = true;
 
-    fetch(`${window.location.origin}/sweepxpress/api/buy_now.php`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `product_id=${encodeURIComponent(productId)}`,
-    })
-        .then((res) => res.json())
+    sxPostJson('/sweepxpress/api/buy_now.php', `product_id=${encodeURIComponent(productId)}`)
         .then((data) => {
             if (data.status === 'success') {
                 window.location.href = data.redirect;
@@ -153,8 +158,8 @@ function sxBuyNow(productId, btn) {
             if (btn) btn.disabled = false;
         })
         .catch((err) => {
-            console.error('Error:', err);
-            sxToast('Something went wrong', 'error');
+            console.error('Buy now:', err);
+            sxToast(err.name === 'AbortError' ? 'Server is slow — please try again' : 'Something went wrong', 'error');
             if (btn) btn.disabled = false;
         });
 }

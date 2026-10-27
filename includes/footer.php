@@ -14,7 +14,7 @@
             <!-- Brand -->
             <div class="sx-footer-brand">
                 <a href="/sweepxpress/index.php" class="sx-footer-logo">
-                    <span class="sx-logo-mark" aria-hidden="true">X</span>
+                    <span class="sx-logo-mark" aria-hidden="true"><img src="/sweepxpress/assets/brand/logo-256.png" alt=""></span>
                     <span class="sx-wordmark sx-wordmark-light">Sweep<span class="sx-wordmark-x">X</span>press</span>
                 </a>
                 <p>Cleaning supplies for homes and businesses — from our warehouse straight to your door.</p>

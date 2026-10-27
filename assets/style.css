@@ -1276,6 +1276,8 @@ a:hover > .sx-wordmark { background-position: 50% 100%; }  /* dumudulas pataas a
 }
 a:hover > .sx-logo-mark { transform: rotate(0); }
 .sx-logo-mark img { width: 100%; height: 100%; object-fit: contain; }
+/* Kapag totoong logo na ang laman: may sariling background ang larawan, kaya hindi na nakatagilid at walang gradient */
+.sx-logo-mark:has(img) { background: none; transform: none; overflow: hidden; }
 
 /* ----- Footer (Phase 9a) ----- */
 .sx-footer {
@@ -1515,6 +1517,45 @@ a:hover > .sx-logo-mark { transform: rotate(0); }
 .sx-empty i { display: block; margin-bottom: var(--sx-space-4); font-size: 2.5rem; color: var(--sx-border); }
 .sx-empty h3 { margin: 0 0 var(--sx-space-2); font-size: var(--sx-text-lg); font-weight: var(--sx-weight-bold); color: var(--sx-dark); }
 
+/* ----- Navbar search (Shopee-style, index.php lang — $sxHeaderSearch sa header.php) ----- */
+.sx-nav-search {
+  position: relative;
+  order: 10;                         /* mobile: sariling hilera sa ilalim ng logo */
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--sx-space-2);
+  padding: 4px 4px 4px 40px;
+  border: 1px solid var(--sx-border);
+  border-radius: var(--sx-radius-pill);
+  background: var(--sx-surface-alt);
+  transition: border-color var(--sx-transition), box-shadow var(--sx-transition), background var(--sx-transition);
+}
+.sx-nav-search:focus-within { border-color: var(--sx-primary); background: var(--sx-surface); box-shadow: var(--sx-focus-ring); }
+.sx-nav-search > i { position: absolute; left: 16px; color: var(--sx-muted); pointer-events: none; }
+.sx-nav-search input {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  padding: 8px 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--sx-text);
+  font: inherit;
+  font-size: var(--sx-text-sm);
+}
+.sx-nav-search input:focus { outline: none; border: none; box-shadow: none; }  /* lumang global input:focus */
+.sx-nav-search .sx-btn { flex-shrink: 0; }
+@media (max-width: 991.98px) {
+  .sx-nav-search ~ .navbar-collapse { order: 11; }   /* menu sa ilalim ng search kapag binuksan */
+  body.sx-has-nav-search { padding-top: 124px; }     /* fallback; sinusukat ng index.php ang eksaktong taas */
+}
+@media (min-width: 992px) {
+  .sx-nav-search { order: 0; flex: 1 1 auto; max-width: 620px; margin: 0 var(--sx-space-5); }
+}
+
 /* ----- Product card + grid (Phase 9b) — includes/product_card.php; index.php at product.php ----- */
 .store-grid {
   display: grid;
@@ -1617,6 +1658,8 @@ a:hover > .sx-logo-mark { transform: rotate(0); }
   margin-top: auto;
   padding-top: var(--sx-space-2);
 }
+.store-price-wrap { display: flex; flex-direction: column; min-width: 0; }
+.store-sold { font-size: 0.7rem; color: var(--sx-muted); }
 .store-price {
   font-size: var(--sx-text-lg);
   font-weight: var(--sx-weight-extrabold);

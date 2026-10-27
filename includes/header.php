@@ -18,7 +18,9 @@ require_once __DIR__ . '/../config.php';
     <!-- PANSAMANTALA: ginagamit pa ng 16 file; aalisin sa Phase 9 kapag Font Awesome na lahat -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
     <!-- Huling CSS para ang design tokens at sx- components ang masunod -->
-    <link rel="stylesheet" href="/sweepxpress/assets/style.css">
+    <link rel="stylesheet" href="/sweepxpress/assets/style.css?v=<?= filemtime(__DIR__ . '/../assets/style.css') ?>">
+    <link rel="icon" type="image/png" sizes="32x32" href="/sweepxpress/assets/brand/favicon-32.png">
+    <link rel="apple-touch-icon" href="/sweepxpress/assets/brand/apple-touch-icon.png">
 
     <style>
         /* (CSS is omitted for brevity, it remains the same as previously provided) */
@@ -372,9 +374,9 @@ require_once __DIR__ . '/../config.php';
     </script>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
-    <script src="/sweepxpress/assets/script.js" defer></script>
+    <script src="/sweepxpress/assets/script.js?v=<?= filemtime(__DIR__ . '/../assets/script.js') ?>" defer></script>
 </head>
-<body>
+<body<?php echo !empty($sxHeaderSearch) ? ' class="sx-has-nav-search"' : ''; ?>>
 
 <div class="ptr-indicator" id="ptrIndicator">
     <div class="ptr-spinner"></div>
@@ -427,9 +429,18 @@ $sxCurrentPage = basename($_SERVER['SCRIPT_NAME'] ?? '');
             }
         ?>">
             <!-- Placeholder ng logo; papalitan ng <img> kapag nasa assets/brand/ na ang transparent PNG -->
-            <span class="sx-logo-mark" aria-hidden="true">X</span>
+            <span class="sx-logo-mark" aria-hidden="true"><img src="/sweepxpress/assets/brand/logo-256.png" alt=""></span>
             <span class="sx-wordmark">Sweep<span class="sx-wordmark-x">X</span>press</span>
         </a>
+
+        <?php if (!empty($sxHeaderSearch)): // Shopee-style na search sa navbar — index.php lang ?>
+            <form class="sx-nav-search" action="/sweepxpress/index.php#products" method="get" role="search">
+                <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                <input type="search" name="search" placeholder="Search cleaning supplies..." aria-label="Search products"
+                       value="<?php echo h($sxSearchValue ?? ''); ?>">
+                <button type="submit" class="sx-btn sx-btn-primary sx-btn-sm">Search</button>
+            </form>
+        <?php endif; ?>
 
         <div class="header-right d-flex align-items-center gap-2 ms-auto">
             <?php if (is_logged_in()): ?>

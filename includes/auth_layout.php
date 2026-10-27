@@ -17,13 +17,15 @@ if (!function_exists('sx_auth_start')) {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-    <link rel="stylesheet" href="/sweepxpress/assets/style.css">
+    <link rel="stylesheet" href="/sweepxpress/assets/style.css?v=<?= filemtime(__DIR__ . '/../assets/style.css') ?>">
+    <link rel="icon" type="image/png" sizes="32x32" href="/sweepxpress/assets/brand/favicon-32.png">
+    <link rel="apple-touch-icon" href="/sweepxpress/assets/brand/apple-touch-icon.png">
 </head>
 <body class="sx-auth-body">
 <div class="sx-auth">
     <aside class="sx-auth-panel">
         <a href="/sweepxpress/index.php" class="sx-auth-brand">
-            <span class="sx-logo-mark" aria-hidden="true">X</span>
+            <span class="sx-logo-mark" aria-hidden="true"><img src="/sweepxpress/assets/brand/logo-256.png" alt=""></span>
             <span class="sx-wordmark sx-wordmark-light">Sweep<span class="sx-wordmark-x">X</span>press</span>
         </a>
         <div>
@@ -42,7 +44,7 @@ if (!function_exists('sx_auth_start')) {
         <div class="sx-auth-top">
             <a href="<?= $esc($backHref) ?>" class="sx-btn sx-btn-ghost sx-btn-sm"><i class="fa-solid fa-arrow-left"></i> <?= $esc($backLabel) ?></a>
             <a href="/sweepxpress/index.php" class="sx-auth-mobile-brand" aria-label="SweepXpress home">
-                <span class="sx-logo-mark" aria-hidden="true">X</span>
+                <span class="sx-logo-mark" aria-hidden="true"><img src="/sweepxpress/assets/brand/logo-256.png" alt=""></span>
                 <span class="sx-wordmark">Sweep<span class="sx-wordmark-x">X</span>press</span>
             </a>
         </div>
@@ -56,7 +58,7 @@ if (!function_exists('sx_auth_start')) {
         </div>
     </main>
 </div>
-<script src="/sweepxpress/assets/script.js"></script>
+<script src="/sweepxpress/assets/script.js?v=<?= filemtime(__DIR__ . '/../assets/script.js') ?>"></script>
 </body>
 </html>
         <?php
