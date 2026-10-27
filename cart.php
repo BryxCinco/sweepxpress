@@ -184,1266 +184,322 @@ if (isset($_SESSION['user']['role']) && $_SESSION['user']['role'] === 'business'
 require_once __DIR__ . '/includes/header.php';
 ?>
 
-
 <style>
-/* ALERT/NOTIFICATION STYLES */
-.alert-container {
-    position: sticky;
-    top: 80px;
-    z-index: 100;
-    margin-bottom: 20px;
-}
-
-
-.alert {
-    padding: 12px 16px;
-    border-radius: 6px;
-    font-size: 14px;
-    font-weight: 500;
-    margin-bottom: 8px;
+/* ============================================================
+   CART (Phase 9c) — tokens + sx-alert / sx-qty mula sa assets/style.css
+   ============================================================ */
+.cart { padding-block: var(--sx-space-5) var(--sx-space-8); }
+.cart-head {
     display: flex;
-    align-items: flex-start;
-    gap: 12px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--sx-space-3);
+    margin-bottom: var(--sx-space-5);
 }
+.cart-head p { margin: var(--sx-space-2) 0 0; color: var(--sx-muted); }
+.cart-alerts { display: grid; gap: var(--sx-space-2); margin-bottom: var(--sx-space-5); }
+.cart-layout { display: grid; gap: var(--sx-space-5); align-items: start; }
 
-
-.alert-warning {
-    background: #fef3c7; /* yellow-100 */
-    color: #92400e; /* yellow-800 */
-    border: 1px solid #fde68a; /* yellow-200 */
-}
-
-
-.alert-icon {
-    flex-shrink: 0;
-    font-size: 18px;
-    line-height: 1;
-}
-
-
-.alert-text strong {
-    /* Ensures the converted <strong> tag is properly bolded */
-    font-weight: 700;
-}
-
-
-/* Enhanced animations for client-side alerts */
-.client-temp-alert {
-    animation: slideInDown 0.3s ease-out;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-
-@keyframes slideInDown {
-    from {
-        opacity: 0;
-        transform: translateY(-20px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-/* ============================================================= */
-
-
-
-/* ==================== COMPACT E-COMMERCE CART (EXISTING STYLES FOLLOW) ==================== */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-
-:root {
-    --primary: #3b82f6;
-    --primary-hover: #2563eb;
-    --dark: #18181b;
-    --gray-900: #27272a;
-    --gray-700: #3f3f46;
-    --gray-500: #71717a;
-    --gray-300: #d4d4d8;
-    --gray-200: #e4e4e7;
-    --gray-100: #f4f4f5;
-    --white: #ffffff;
-    --red: #ef4444;
-    --shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-}
-
-
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
-
-
-body {
-    background: var(--gray-100);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    -webkit-font-smoothing: antialiased;
-    font-size: 14px;
-}
-
-
-.cart-wrapper {
-    max-width: 1400px;          /* keep your preferred width */
-    margin: 0 auto;
-    padding: 16px 24px;
-    min-height: calc(100vh - 80px); 
-    /* 100vh minus approx header height so the footer starts below */
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-}
-
-
-/* ========== HEADER ========== */
-.cart-header {
-    margin-bottom: 20px;
-}
-
-
-.cart-title {
-    font-size: 20px;
-    font-weight: 700;
-    color: var(--dark);
-    margin-bottom: 4px;
-}
-
-
-.cart-subtitle {
-    font-size: 14px;
-    color: var(--gray-500);
-}
-
-
-/* ========== LAYOUT ========== */
-.cart-grid {
-    display: grid;
-    grid-template-columns: 1fr 340px;
-    gap: 16px;
-    align-items: flex-start;
-    width: 100%;
-    margin-top: 8px;
-}
-
-
-/* ========== ITEMS CARD ========== */
-.items-card {
-    background: var(--white);
-    border-radius: 8px;
-    box-shadow: var(--shadow);
-    border: 1px solid var(--gray-200);
-}
-
-
+/* Items */
+.cart-items { padding: 0; overflow: hidden; }
 .cart-item {
     display: grid;
-    grid-template-columns: 80px 1fr;
-    gap: 12px;
-    padding: 16px;
-    border-bottom: 1px solid var(--gray-100);
-    align-items: flex-start;
+    grid-template-columns: 88px 1fr;
+    gap: var(--sx-space-4);
+    padding: var(--sx-space-4) var(--sx-space-5);
+    border-bottom: 1px solid var(--sx-border-light);
+    transition: opacity var(--sx-transition);
 }
-
-
-.cart-item:last-child {
-    border-bottom: none;
-}
-
-
-/* Image */
-.item-image {
-    width: 80px;
-    height: 80px;
-    border-radius: 6px;
+.cart-item:last-child { border-bottom: none; }
+.cart-item.updating { opacity: 0.5; pointer-events: none; }
+.cart-thumb {
+    display: block;
+    width: 88px;
+    height: 88px;
+    border-radius: var(--sx-radius-md);
+    background: var(--sx-surface-alt);
     overflow: hidden;
-    background: var(--gray-100);
+}
+.cart-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.cart-info { display: grid; gap: var(--sx-space-3); min-width: 0; }
+.cart-info-top { display: flex; justify-content: space-between; gap: var(--sx-space-3); }
+.cart-name { margin: 0; font-size: var(--sx-text-base); font-weight: var(--sx-weight-bold); line-height: 1.3; }
+.cart-name a { color: var(--sx-dark); text-decoration: none; }
+.cart-name a:hover { color: var(--sx-primary); }
+.cart-meta { margin: 4px 0 0; font-size: var(--sx-text-xs); color: var(--sx-muted); }
+.cart-meta .low { color: var(--sx-status-pending); font-weight: var(--sx-weight-semibold); }
+.cart-remove {
+    display: inline-grid;
+    place-items: center;
     flex-shrink: 0;
-    border: 1px solid var(--gray-200);
-}
-
-
-.item-image img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-
-/* Details */
-.item-details {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    min-width: 0;
-}
-
-
-.item-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 12px;
-}
-
-
-.item-name {
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--dark);
-    line-height: 1.4;
-    flex: 1;
-}
-
-
-.item-price {
-    font-size: 15px;
-    font-weight: 700;
-    color: var(--primary);
-    white-space: nowrap;
-}
-
-
-/* Controls Row */
-.item-controls {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-}
-
-
-.qty-group {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    background: var(--gray-100);
-    border: 1px solid var(--gray-200);
-    border-radius: 6px;
-    padding: 4px 6px;
-    transition: all 0.2s ease;
-}
-
-
-/* Visual feedback when input exceeds stock */
-.qty-group.over-limit {
-    border-color: #ef4444;
-    background: #fee2e2;
-}
-
-
-.qty-btn {
-    width: 28px;
-    height: 28px;
+    width: 34px;
+    height: 34px;
     border: none;
-    background: var(--white);
-    color: var(--gray-700);
-    border-radius: 4px;
-    font-size: 16px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    line-height: 1;
-}
-
-
-.qty-btn:hover:not(:disabled) {
-    background: var(--primary);
-    color: white;
-}
-
-
-.qty-btn:disabled {
-    opacity: 0.3;
-    cursor: not-allowed;
-}
-
-
-.qty-input {
-    /* Set a width based on character size (8ch = 8 zeros wide) */
-    width: 8ch; 
-    height: 28px;
-    text-align: center;
-    border: none;
+    border-radius: 50%;
     background: transparent;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--dark);
-    transition: all 0.2s ease;
-}
-
-
-/* Visual feedback for over-limit input */
-.qty-input.over-limit {
-    color: #dc2626;
-    font-weight: 700;
-}
-
-
-/* FIX: Remove default spinners from type="number" inputs in all browsers */
-.qty-input::-webkit-outer-spin-button,
-.qty-input::-webkit-inner-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
-}
-.qty-input[type=number] {
-    -moz-appearance: textfield;
-    appearance: textfield;
-}
-
-
-.qty-input:focus {
-    outline: none;
-}
-
-
-.item-right {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-
-.item-subtotal {
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--dark);
-}
-
-
-.item-remove {
-    background: none;
-    border: none;
-    color: var(--gray-500);
-    font-size: 13px;
-    font-weight: 500;
+    color: var(--sx-muted);
     cursor: pointer;
-    padding: 4px 8px;
-    border-radius: 4px;
-    transition: all 0.15s ease;
+    transition: background var(--sx-transition), color var(--sx-transition);
 }
+.cart-remove:hover { background: var(--sx-status-cancelled-bg); color: var(--sx-danger); }
+.cart-info-bottom { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sx-space-3); }
+.cart-subtotal { font-size: var(--sx-text-lg); font-weight: var(--sx-weight-extrabold); letter-spacing: var(--sx-tracking-tight); color: var(--sx-dark); }
 
-
-.item-remove:hover {
-    background: var(--gray-100);
-    color: var(--red);
-}
-
-
-/* ========== SUMMARY CARD ========== */
-.summary-card {
-    position: sticky;
-    top: 80px;
-    background: var(--white);
-    border-radius: 8px;
-    padding: 20px;
-    box-shadow: var(--shadow);
-    border: 1px solid var(--gray-200);
-}
-
-
-.summary-title {
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--dark);
-    margin-bottom: 16px;
-}
-
-
-.summary-row {
+/* Summary */
+.cart-summary h2 { margin: 0 0 var(--sx-space-4); font-size: var(--sx-text-lg); font-weight: var(--sx-weight-extrabold); color: var(--sx-dark); }
+.cart-row { display: flex; justify-content: space-between; gap: var(--sx-space-3); padding-block: var(--sx-space-2); font-size: var(--sx-text-sm); color: var(--sx-muted); }
+.cart-row strong { color: var(--sx-dark); font-weight: var(--sx-weight-semibold); }
+.cart-total {
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    padding: 10px 0;
-    border-bottom: 1px solid var(--gray-100);
+    align-items: baseline;
+    margin: var(--sx-space-3) 0 var(--sx-space-5);
+    padding-top: var(--sx-space-4);
+    border-top: 1px dashed var(--sx-border);
 }
-
-
-.summary-row:last-of-type {
-    border-bottom: none;
-}
-
-
-.summary-label {
-    font-size: 14px;
-    color: var(--gray-500);
-    font-weight: 500;
-}
-
-
-.summary-value {
-    font-size: 14px;
-    color: var(--dark);
-    font-weight: 600;
-}
-
-
-.summary-total {
-    background: var(--gray-50);
-    margin: 16px -20px -20px;
-    padding: 16px 20px;
-    border-radius: 0 0 8px 8px;
-}
-
-
-.summary-total .summary-label {
-    font-size: 14px;
-    font-weight: 700;
-    color: var(--dark);
-}
-
-
-.summary-total .summary-value {
-    font-size: 20px;
-    font-weight: 700;
-    color: var(--dark);
-}
-
-
-/* ========== BUTTONS ========== */
-.summary-actions {
+.cart-total span { font-weight: var(--sx-weight-bold); color: var(--sx-dark); }
+.cart-total strong { font-size: var(--sx-text-2xl); font-weight: var(--sx-weight-extrabold); letter-spacing: var(--sx-tracking-tight); color: var(--sx-dark); }
+.cart-actions { display: grid; gap: var(--sx-space-2); }
+.cart-note {
     display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin-top: 16px;
+    gap: var(--sx-space-2);
+    margin: var(--sx-space-4) 0 0;
+    font-size: var(--sx-text-xs);
+    color: var(--sx-muted);
 }
+.cart-note i { color: var(--sx-accent-dark); margin-top: 2px; }
 
-
-.btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    padding: 12px 20px;
-    border: none;
-    border-radius: 6px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    text-decoration: none;
+@media (min-width: 992px) {
+    .cart-layout { grid-template-columns: 1fr 360px; }
+    .cart-summary { position: sticky; top: 96px; }
 }
-
-
-.btn-primary {
-    background: var(--primary);
-    color: white;
-}
-
-
-.btn-primary:hover {
-    background: var(--primary-hover);
-}
-
-
-.btn-secondary {
-    background: var(--white);
-    color: var(--dark);
-    border: 1px solid var(--gray-200);
-}
-
-
-.btn-secondary:hover {
-    background: var(--gray-50);
-}
-
-
-/* ========== EMPTY STATE ========== */
-.cart-empty {
-    text-align: center;
-    padding: 60px 20px;
-    background: var(--white);
-    border-radius: 8px;
-    box-shadow: var(--shadow);
-    border: 1px solid var(--gray-200);
-}
-
-
-.empty-icon {
-    font-size: 48px;
-    margin-bottom: 16px;
-    opacity: 0.3;
-}
-
-
-.empty-title {
-    font-size: 18px;
-    font-weight: 700;
-    color: var(--dark);
-    margin-bottom: 8px;
-}
-
-
-.empty-text {
-    font-size: 14px;
-    color: var(--gray-500);
-    margin-bottom: 20px;
-}
-
-
-/* ========== SKELETON LOADER ========== */
-.skeleton {
-    background: linear-gradient(90deg, #e4e4e7 25%, #d4d4d8 50%, #e4e4e7 75%);
-    background-size: 200% 100%;
-    animation: skeleton-shimmer 1.5s ease-in-out infinite;
-    border-radius: 6px;
-}
-
-
-@keyframes skeleton-shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-}
-
-
-.skeleton-item {
-    display: grid;
-    grid-template-columns: 80px 1fr;
-    gap: 12px;
-    padding: 16px;
-    border-bottom: 1px solid var(--gray-100);
-}
-
-
-.skeleton-item:last-child {
-    border-bottom: none;
-}
-
-
-.skeleton-image {
-    width: 80px;
-    height: 80px;
-    border-radius: 6px;
-}
-
-
-.skeleton-content {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-
-.skeleton-title {
-    height: 20px;
-    width: 70%;
-    border-radius: 4px;
-}
-
-
-.skeleton-price {
-    height: 18px;
-    width: 80px;
-    border-radius: 4px;
-}
-
-
-.skeleton-controls {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    margin-top: 4px;
-}
-
-
-.skeleton-qty {
-    height: 36px;
-    width: 120px;
-    border-radius: 6px;
-}
-
-
-.skeleton-subtotal {
-    height: 20px;
-    width: 80px;
-    border-radius: 4px;
-}
-
-
-.skeleton-remove {
-    height: 16px;
-    width: 60px;
-    border-radius: 4px;
-}
-
-
-.skeleton-summary-title {
-    height: 22px;
-    width: 140px;
-    margin-bottom: 16px;
-    border-radius: 4px;
-}
-
-
-.skeleton-summary-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 10px 0;
-}
-
-
-.skeleton-summary-label {
-    height: 18px;
-    width: 100px;
-    border-radius: 4px;
-}
-
-
-.skeleton-summary-value {
-    height: 18px;
-    width: 70px;
-    border-radius: 4px;
-}
-
-
-.skeleton-button {
-    height: 44px;
-    width: 100%;
-    border-radius: 6px;
-    margin-bottom: 10px;
-}
-
-
-/* Hide skeleton after load */
-#cart-skeleton {
-    display: grid !important;
-}
-
-
-#cart-real {
-    display: none !important;
-}
-
-
-body.content-loaded #cart-skeleton {
-    display: none !important;
-}
-
-
-body.content-loaded #cart-real {
-    display: grid !important;
-}
-
-
-/* ========== UPDATING STATE ========== */
-.updating {
-    pointer-events: none;
-    opacity: 0.5;
-}
-
-
-/* ========== RESPONSIVE ========== */
-@media (max-width: 1024px) {
-    .cart-grid {
-        grid-template-columns: 1fr;
-    }
-    
-    .summary-card {
-        position: static;
-    }
-
-
-    .cart-wrapper {
-        max-width: 100%;
-        padding: 16px;
-        min-height: calc(100vh - 72px);
-    }
-}
-
-
-@media (max-width: 768px) {
-    .cart-wrapper {
-        padding: 12px;
-    }
-    
-    .cart-header {
-        margin-bottom: 16px;
-    }
-    
-    .cart-title {
-        font-size: 18px;
-    }
-    
-    .skeleton-item {
-        grid-template-columns: 70px 1fr;
-    }
-    
-    .skeleton-image {
-        width: 70px;
-        height: 70px;
-    }
-}
-
-
-@media (max-width: 640px) {
-    .cart-item {
-        grid-template-columns: 70px 1fr;
-        gap: 12px;
-        padding: 12px;
-    }
-    
-    .item-image {
-        width: 70px;
-        height: 70px;
-    }
-    
-    .item-name {
-        font-size: 14px;
-    }
-    
-    .item-price {
-        font-size: 14px;
-    }
-    
-    .item-subtotal {
-        font-size: 15px;
-    }
-    
-    .item-controls {
-        flex-wrap: wrap;
-    }
-    
-    .summary-card {
-        padding: 16px;
-    }
-    
-    .summary-total {
-        margin: 16px -16px -16px;
-        padding: 16px;
-    }
-
-
-    .cart-wrapper {
-        padding: 12px 10px;
-        min-height: calc(100vh - 64px);
-    }
-}
-
-
-@media (max-width: 480px) {
-    .cart-wrapper {
-        padding: 8px;
-    }
-    
-    .cart-item {
-        grid-template-columns: 60px 1fr;
-        gap: 10px;
-        padding: 12px;
-    }
-    
-    .item-image {
-        width: 60px;
-        height: 60px;
-        border-radius: 4px;
-    }
-    
-    .item-details {
-        gap: 10px;
-    }
-    
-    .item-name {
-        font-size: 13px;
-    }
-    
-    .item-price {
-        font-size: 13px;
-    }
-    
-    .item-controls {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 10px;
-    }
-    
-    .item-right {
-        width: 100%;
-        justify-content: space-between;
-    }
-    
-    .qty-group {
-        padding: 3px 5px;
-        gap: 6px;
-    }
-    
-    .qty-btn {
-        width: 26px;
-        height: 26px;
-        font-size: 14px;
-    }
-    
-    /* Removed fixed width here, relying on 8ch from main style */
-    .qty-input {
-        height: 26px;
-        font-size: 13px;
-    }
-    
-    .item-subtotal {
-        font-size: 14px;
-    }
-    
-    .item-remove {
-        font-size: 12px;
-        padding: 4px 6px;
-    }
-    
-    .summary-card {
-        padding: 14px;
-    }
-    
-    .summary-title {
-        font-size: 15px;
-        margin-bottom: 12px;
-    }
-    
-    .summary-row {
-        padding: 8px 0;
-    }
-    
-    .summary-label {
-        font-size: 13px;
-    }
-    
-    .summary-value {
-        font-size: 13px;
-    }
-    
-    .summary-total {
-        margin: 12px -14px -14px;
-        padding: 12px 14px;
-    }
-    
-    .summary-total .summary-value {
-        font-size: 18px;
-    }
-    
-    .btn {
-        padding: 11px 16px;
-        font-size: 13px;
-    }
-    
-    .skeleton-item {
-        grid-template-columns: 60px 1fr;
-        gap: 10px;
-        padding: 12px;
-    }
-    
-    .skeleton-image {
-        width: 60px;
-        height: 60px;
-    }
-}
-
-
-@media (max-width: 375px) {
-    body {
-        font-size: 13px;
-    }
-    
-    .cart-item {
-        grid-template-columns: 56px 1fr;
-        gap: 8px;
-        padding: 10px;
-    }
-    
-    .item-image {
-        width: 56px;
-        height: 56px;
-    }
-    
-    .item-name {
-        font-size: 12.5px;
-    }
-    
-    .item-price,
-    .item-subtotal {
-        font-size: 13px;
-    }
-    
-    .qty-btn {
-        width: 24px;
-        height: 24px;
-        font-size: 13px;
-    }
-    
-    /* Removed fixed width here, relying on 8ch from main style */
-    .qty-input {
-        height: 24px;
-    }
-    
-    .skeleton-item {
-        grid-template-columns: 56px 1fr;
-        gap: 8px;
-        padding: 10px;
-    }
-    
-    .skeleton-image {
-        width: 56px;
-        height: 56px;
-    }
-    
-    .cart-wrapper {
-        padding: 10px 8px;
-        min-height: calc(100vh - 56px);
-    }
+@media (max-width: 575.98px) {
+    .cart-item { grid-template-columns: 72px 1fr; padding: var(--sx-space-4); gap: var(--sx-space-3); }
+    .cart-thumb { width: 72px; height: 72px; }
 }
 </style>
 
+<div class="cart sx-container">
+    <div class="cart-head">
+        <div>
+            <span class="sx-eyebrow">Cart</span>
+            <h1 class="sx-heading-lg">Shopping Cart</h1>
+            <p>
+                <?php if ($items): ?>
+                    <?php echo $itemCount; ?> product<?php echo $itemCount === 1 ? '' : 's'; ?> · <?php echo $totalQuantity; ?> unit<?php echo $totalQuantity === 1 ? '' : 's'; ?>
+                <?php else: ?>
+                    Review and manage your items
+                <?php endif; ?>
+            </p>
+        </div>
+        <?php if ($items): ?>
+            <a href="/sweepxpress/index.php#products" class="sx-btn sx-btn-ghost"><i class="fa-solid fa-arrow-left"></i> Continue shopping</a>
+        <?php endif; ?>
+    </div>
 
-<div class="cart-wrapper">
-    <header class="cart-header">
-        <h1 class="cart-title">Shopping Cart</h1>
-        <p class="cart-subtitle">Review and manage your items</p>
-    </header>
-    
-    <?php if ($notifications): // Display server-side notifications if any ?>
-        <div class="alert-container">
+    <?php if ($notifications): // Server-side na abiso (hal. naibaba sa available stock) ?>
+        <div class="cart-alerts">
             <?php foreach ($notifications as $note): ?>
-                <div class="alert alert-warning">
-                    <div class="alert-icon">⚠️</div>
-                    <div class="alert-text"><?php echo format_notification($note); ?></div>
+                <div class="sx-alert sx-alert-warning" role="status">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    <div><?php echo format_notification($note); ?></div>
                 </div>
             <?php endforeach; ?>
         </div>
-    <?php elseif (!$items): // Only create alert container if notifications exist OR cart is not empty ?>
-        <!-- Empty container for client-side notifications -->
-    <?php else: ?>
-        <div class="alert-container"></div>
     <?php endif; ?>
-    
+
     <?php if (!$items): ?>
-        <div class="cart-empty">
-            <div class="empty-icon">🛒</div>
-            <h2 class="empty-title">Your cart is empty</h2>
-            <p class="empty-text">Add products to get started</p>
-            <a href="/sweepxpress/index.php" class="btn btn-primary">
-                Browse Products
+        <div class="sx-card sx-empty">
+            <i class="fa-solid fa-cart-shopping"></i>
+            <h3>Your cart is empty</h3>
+            <p style="margin: 0 0 var(--sx-space-4)">Add products to get started.</p>
+            <a href="/sweepxpress/index.php#products" class="sx-btn sx-btn-dark sx-btn-arrow">
+                Browse products <span class="sx-btn-icon"><i class="fa-solid fa-arrow-right"></i></span>
             </a>
         </div>
     <?php else: ?>
-        <div class="cart-grid" id="cart-skeleton">
-        </div>
-
-
-        <div class="cart-grid" id="cart-real">
-            <div class="items-card">
+        <div class="cart-layout">
+            <div class="sx-card cart-items">
                 <form id="cartForm" method="post">
-                    <?php foreach ($items as $it): ?>
-                        <div class="cart-item" data-product-id="<?php echo (int)$it['p']['id']; ?>">
-                            <div class="item-image">
-                                <img src="<?php echo h($it['p']['image_path']); ?>" 
-                                     alt="<?php echo h($it['p']['name']); ?>"
-                                     onerror="this.src='https://via.placeholder.com/80x80?text=Product'">
-                            </div>
-                            
-                            <div class="item-details">
-                                <div class="item-top">
-                                    <h3 class="item-name"><?php echo h($it['p']['name']); ?></h3>
-                                    <div class="item-price">₱<?php echo number_format($it['p']['price'], 2); ?></div>
+                    <?php foreach ($items as $it):
+                        $pid   = (int)$it['p']['id'];
+                        $stock = (int)$it['p']['stock'];
+                    ?>
+                        <div class="cart-item" data-product-id="<?php echo $pid; ?>">
+                            <a href="/sweepxpress/product.php?id=<?php echo $pid; ?>" class="cart-thumb" tabindex="-1" aria-hidden="true">
+                                <img src="<?php echo h($it['p']['image_path'] ?: '/sweepxpress/assets/placeholder.jpg'); ?>" alt=""
+                                     onerror="this.src='/sweepxpress/assets/placeholder.jpg'">
+                            </a>
+
+                            <div class="cart-info">
+                                <div class="cart-info-top">
+                                    <div>
+                                        <h3 class="cart-name"><a href="/sweepxpress/product.php?id=<?php echo $pid; ?>"><?php echo h($it['p']['name']); ?></a></h3>
+                                        <p class="cart-meta">
+                                            ₱<?php echo number_format($it['p']['price'], 2); ?> each
+                                            <?php if ($stock <= 10): ?> · <span class="low">Only <?php echo $stock; ?> left</span><?php endif; ?>
+                                        </p>
+                                    </div>
+                                    <button type="button" class="cart-remove item-remove" data-product-id="<?php echo $pid; ?>" aria-label="Remove <?php echo h($it['p']['name']); ?>">
+                                        <i class="fa-solid fa-trash-can"></i>
+                                    </button>
                                 </div>
-                                
-                                <div class="item-controls">
-                                    <div class="qty-group" data-product-id="<?php echo (int)$it['p']['id']; ?>">
-                                        <button type="button" class="qty-btn qty-decrease" data-product-id="<?php echo (int)$it['p']['id']; ?>">
-                                            <i class="bi bi-dash"></i>
+
+                                <div class="cart-info-bottom">
+                                    <div class="sx-qty qty-group" data-product-id="<?php echo $pid; ?>">
+                                        <button type="button" class="qty-decrease" data-product-id="<?php echo $pid; ?>" aria-label="Decrease quantity">
+                                            <i class="fa-solid fa-minus"></i>
                                         </button>
-                                        <input type="number" 
-                                               class="qty-input" 
-                                               name="qty[<?php echo (int)$it['p']['id']; ?>]" 
+                                        <input type="number"
+                                               class="qty-input"
+                                               name="qty[<?php echo $pid; ?>]"
                                                value="<?php echo (int)$it['qty']; ?>"
                                                min="0"
-                                               max="<?php echo (int)$it['p']['stock']; ?>"
-                                               data-max-qty="<?php echo (int)$it['p']['stock']; ?>"
-                                               data-product-name="<?php echo h($it['p']['name']); ?>"> 
-                                        <button type="button" class="qty-btn qty-increase" data-product-id="<?php echo (int)$it['p']['id']; ?>">
-                                            <i class="bi bi-plus"></i>
+                                               max="<?php echo $stock; ?>"
+                                               data-max-qty="<?php echo $stock; ?>"
+                                               data-original="<?php echo (int)$it['qty']; ?>"
+                                               data-product-name="<?php echo h($it['p']['name']); ?>"
+                                               aria-label="Quantity for <?php echo h($it['p']['name']); ?>">
+                                        <button type="button" class="qty-increase" data-product-id="<?php echo $pid; ?>" aria-label="Increase quantity">
+                                            <i class="fa-solid fa-plus"></i>
                                         </button>
                                     </div>
-                                    
-                                    <div class="item-right">
-                                        <div class="item-subtotal">₱<?php echo number_format($it['subtotal'], 2); ?></div>
-                                        <button type="button" class="item-remove" data-product-id="<?php echo (int)$it['p']['id']; ?>">
-                                            Remove
-                                        </button>
-                                    </div>
+                                    <span class="cart-subtotal">₱<?php echo number_format($it['subtotal'], 2); ?></span>
                                 </div>
                             </div>
                         </div>
                     <?php endforeach; ?>
                 </form>
             </div>
-            
-            <aside class="summary-card">
-                <h2 class="summary-title">Order Summary</h2>
-                
-                <div class="summary-row">
-                    <span class="summary-label">Subtotal (<?php echo $totalQuantity; ?> units)</span>
-                    <span class="summary-value">₱<?php echo number_format($total, 2); ?></span>
-                </div>
-                
-                <div class="summary-row">
-                    <span class="summary-label">Shipping</span>
-                    <span class="summary-value">At checkout</span>
-                </div>
-                
-                <div class="summary-total">
-                    <div class="summary-row" style="padding: 0; border: none;">
-                        <span class="summary-label">Total</span>
-                        <span class="summary-value">₱<?php echo number_format($total, 2); ?></span>
-                    </div>
-                </div>
-                
-                <div class="summary-actions">
-                    <a href="<?= h($checkoutUrl) ?>" class="btn btn-primary">
-                        <?= h($checkoutText) ?>
+
+            <aside class="sx-card cart-summary">
+                <h2>Order summary</h2>
+                <div class="cart-row"><span>Subtotal (<?php echo $totalQuantity; ?> unit<?php echo $totalQuantity === 1 ? '' : 's'; ?>)</span><strong>₱<?php echo number_format($total, 2); ?></strong></div>
+                <div class="cart-row"><span>Delivery fee</span><strong>None</strong></div>
+                <div class="cart-total"><span>Total</span><strong>₱<?php echo number_format($total, 2); ?></strong></div>
+
+                <div class="cart-actions">
+                    <a href="<?= h($checkoutUrl) ?>" class="sx-btn sx-btn-dark sx-btn-lg sx-btn-arrow">
+                        <?= h($checkoutText) ?> <span class="sx-btn-icon"><i class="fa-solid fa-arrow-right"></i></span>
                     </a>
-                    <a href="/sweepxpress/index.php" class="btn btn-secondary">
-                        Continue Shopping
-                    </a>
+                    <a href="/sweepxpress/index.php#products" class="sx-btn sx-btn-outline">Continue shopping</a>
                 </div>
+
+                <?php if (isset($_SESSION['user']['role']) && $_SESSION['user']['role'] === 'business'): ?>
+                    <p class="cart-note"><i class="fa-solid fa-file-invoice"></i> You'll create a purchase order with your payment terms.</p>
+                <?php else: ?>
+                    <p class="cart-note"><i class="fa-solid fa-money-bill-wave"></i> Pay with cash on delivery.</p>
+                <?php endif; ?>
             </aside>
         </div>
     <?php endif; ?>
 </div>
 
-
-<?php require_once __DIR__ . '/includes/footer.php'; ?>
-
-
 <script>
-// Show content after page load
-document.addEventListener('DOMContentLoaded', function() {
-    const loadStart = performance.now();
-    
-    function showContent() {
-        const loadTime = performance.now() - loadStart;
-        const minSkeletonTime = Math.min(1500, Math.max(300, loadTime * 0.5));
-        
-        setTimeout(function() {
-            document.body.classList.add('content-loaded');
-        }, minSkeletonTime);
-    }
-    
-    if (document.readyState === 'complete') {
-        showContent();
-    } else {
-        window.addEventListener('load', showContent);
-        setTimeout(showContent, 2000);
-    }
-
-
-    // Cart functionality
+document.addEventListener('DOMContentLoaded', function () {
     const cartForm = document.getElementById('cartForm');
     if (!cartForm) return;
-    
-    const increaseButtons = document.querySelectorAll('.qty-increase');
-    const decreaseButtons = document.querySelectorAll('.qty-decrease');
-    const removeButtons = document.querySelectorAll('.item-remove');
-    const qtyInputs = document.querySelectorAll('.qty-input'); 
-    
-    /**
-     * Helper function to display an immediate, in-page notification.
-     * This message is temporary and is cleared by the next server-side refresh.
-     */
-    function displayClientNotification(message) {
-        let alertContainer = document.querySelector('.alert-container');
-        
-        // Create alert container if it doesn't exist
-        if (!alertContainer) {
-            alertContainer = document.createElement('div');
-            alertContainer.className = 'alert-container';
-            const cartHeader = document.querySelector('.cart-header');
-            if (cartHeader) {
-                cartHeader.after(alertContainer);
-            }
-        }
 
+    let submitting = false;
 
-        // Clear any previous temporary alerts to prevent clutter
-        document.querySelectorAll('.client-temp-alert').forEach(el => el.remove());
-
-
-        const alertDiv = document.createElement('div');
-        alertDiv.className = 'alert alert-warning client-temp-alert';
-        alertDiv.innerHTML = `
-            <div class="alert-icon">⚠️</div>
-            <div class="alert-text">${message}</div>
-        `;
-        // Prepend the new alert so it appears at the top of the container
-        alertContainer.prepend(alertDiv);
+    // Isang submit lang kahit sabay-sabay ang input, blur at change (dati 2–3 beses)
+    function submitCart(input) {
+        if (submitting) return;
+        submitting = true;
+        input.closest('.cart-item').classList.add('updating');
+        cartForm.submit();
     }
-    
-    /**
-     * Updates the input value and submits the form after a delay.
-     * @param {HTMLElement} input The quantity input element.
-     * @param {number} newValue The new quantity value.
-     * @param {number} delay The delay in milliseconds before submitting.
-     */
-    function updateQuantity(input, newValue, delay = 200) {
-        const cartItem = input.closest('.cart-item');
-        // Check if the quantity is actually changing before adding 'updating' class
-        const currentValue = parseInt(input.value) || 0;
-        if (newValue !== currentValue) {
-            cartItem.classList.add('updating');
-        }
-        
-        input.value = newValue;
-        
-        // Use the specified delay before submitting
-        setTimeout(() => {
-            cartForm.submit();
-        }, delay);
-    }
-    
-    /**
-     * Adds visual feedback to the quantity group
-     * @param {HTMLElement} input The quantity input element
-     * @param {boolean} isOverLimit Whether the input exceeds the limit
-     */
-    function setVisualFeedback(input, isOverLimit) {
-        const qtyGroup = input.closest('.qty-group');
-        if (isOverLimit) {
-            qtyGroup.classList.add('over-limit');
-            input.classList.add('over-limit');
-        } else {
-            qtyGroup.classList.remove('over-limit');
-            input.classList.remove('over-limit');
-        }
-    }
-    
-    // 1. Listen for clicks on the increase buttons (Uses data-max-qty for stock limit)
-    increaseButtons.forEach(btn => {
-        btn.addEventListener('click', function() {
-            const productId = this.dataset.productId;
-            const input = cartForm.querySelector(`input[name="qty[${productId}]"]`);
-            
-            const maxStock = parseInt(input.dataset.maxQty) || 999; 
-            const productName = input.dataset.productName || 'This item';
 
+    function inputFor(productId) {
+        return cartForm.querySelector(`input[name="qty[${productId}]"]`);
+    }
 
-            const currentValue = parseInt(input.value) || 0;
-            const requestedValue = currentValue + 1;
-            
-            // Use Math.min with the maxStock for the limit
-            const newValue = Math.min(requestedValue, maxStock);
-            
-            let submitDelay = 200; // Default delay
-            
-            // IMMEDIATE IN-PAGE FEEDBACK LOGIC
-            if (requestedValue > maxStock) {
-                const message = `<strong>${productName}</strong> only has <strong>${maxStock}</strong> in stock. Your quantity has been limited to this amount. The page will reload shortly for confirmation.`;
-                displayClientNotification(message); // Show the in-page alert instantly
-                setVisualFeedback(input, true);
-                submitDelay = 1200; // 👈 INCREASED DELAY to make alert visible
-            } else {
-                setVisualFeedback(input, false);
+    function flagLimit(input, on) {
+        input.closest('.qty-group').classList.toggle('over-limit', on);
+    }
+
+    // textContent sa sxToast — hindi na ipinapasok ang pangalan ng produkto bilang HTML
+    function stockToast(input) {
+        const name = input.dataset.productName || 'This item';
+        sxToast(`${name}: only ${input.dataset.maxQty} in stock`, 'error');
+    }
+
+    // 1. Increase — kapag nasa maximum na, abiso lang (walang reload)
+    cartForm.querySelectorAll('.qty-increase').forEach(btn => {
+        btn.addEventListener('click', function () {
+            const input = inputFor(this.dataset.productId);
+            const max = parseInt(input.dataset.maxQty, 10) || 0;
+            const current = parseInt(input.value, 10) || 0;
+
+            if (current >= max) {
+                flagLimit(input, true);
+                stockToast(input);
+                return;
             }
-            
-            updateQuantity(input, newValue, submitDelay); // Pass the delay
-        });
-    });
-    
-    // 2. Listen for clicks on the decrease buttons
-    decreaseButtons.forEach(btn => {
-        btn.addEventListener('click', function() {
-            const productId = this.dataset.productId;
-            const input = cartForm.querySelector(`input[name="qty[${productId}]"]`);
-            const currentValue = parseInt(input.value) || 0;
-            const newValue = Math.max(currentValue - 1, 0);
-            
-            setVisualFeedback(input, false); // Clear any visual feedback
-            
-            if (newValue === 0) {
-                if (confirm('Remove this item?')) {
-                    updateQuantity(input, 0);
-                }
-            } else {
-                updateQuantity(input, newValue);
-            }
+            input.value = current + 1;
+            submitCart(input);
         });
     });
 
+    // 2. Decrease — kapag 1 na lang, tanong muna bago tanggalin
+    cartForm.querySelectorAll('.qty-decrease').forEach(btn => {
+        btn.addEventListener('click', function () {
+            const input = inputFor(this.dataset.productId);
+            const current = parseInt(input.value, 10) || 0;
+            flagLimit(input, false);
 
-    // 3. ENHANCED: Listen for manual changes in the input field with real-time validation
-    qtyInputs.forEach(input => {
-        let typingTimer;
-        const doneTypingInterval = 800; // Wait 800ms after user stops typing
-        
-        // Real-time feedback as user types (debounced)
-        input.addEventListener('input', function() {
-            clearTimeout(typingTimer);
-            const maxStock = parseInt(this.dataset.maxQty) || 999;
-            const productName = this.dataset.productName || 'This item';
-            const requestedValue = parseInt(this.value) || 0;
-            
-            // Show visual indicator immediately if over limit
-            if (requestedValue > maxStock && requestedValue > 0) {
-                setVisualFeedback(this, true);
-                
-                // Don't submit yet, just show visual feedback
-                const message = `⚠️ <strong>${productName}</strong> only has <strong>${maxStock}</strong> in stock. Your input will be adjusted when you finish typing.`;
-                displayClientNotification(message);
+            if (current <= 1) {
+                if (!confirm('Remove this item from your cart?')) return;
+                input.value = 0;
             } else {
-                setVisualFeedback(this, false);
-                // Clear temporary alerts when input is valid
-                document.querySelectorAll('.client-temp-alert').forEach(el => el.remove());
+                input.value = current - 1;
             }
-            
-            // Set timer to validate and submit after user stops typing
-            typingTimer = setTimeout(() => {
-                validateAndSubmit(this);
-            }, doneTypingInterval);
-        });
-        
-        // Also validate when user leaves the field
-        input.addEventListener('blur', function() {
-            clearTimeout(typingTimer);
-            validateAndSubmit(this);
-        });
-        
-        // Original change event as fallback
-        input.addEventListener('change', function() {
-            clearTimeout(typingTimer);
-            validateAndSubmit(this);
+            submitCart(input);
         });
     });
-    
-    /**
-     * Extract validation logic into a reusable function
-     * @param {HTMLElement} input The quantity input element
-     */
-    function validateAndSubmit(input) {
-        const maxStock = parseInt(input.dataset.maxQty) || 999;
-        const productName = input.dataset.productName || 'This item';
-        const requestedValue = parseInt(input.value) || 0;
-        let newValue = Math.min(Math.max(requestedValue, 0), maxStock);
-        
-        let submitDelay = 200;
-        
-        // IMMEDIATE IN-PAGE FEEDBACK LOGIC
-        if (requestedValue > maxStock && requestedValue > 0) {
-            const message = `<strong>${productName}</strong> only has <strong>${maxStock}</strong> in stock. Your quantity has been limited to this amount. The page will reload shortly for confirmation.`;
-            displayClientNotification(message);
-            setVisualFeedback(input, true);
-            submitDelay = 1200; // 👈 INCREASED DELAY to make alert visible
-        } else {
-            setVisualFeedback(input, false);
-        }
-        
-        updateQuantity(input, newValue, submitDelay);
-    }
-    
-    // 4. Listen for clicks on the remove buttons
-    removeButtons.forEach(btn => {
-        btn.addEventListener('click', function() {
-            if (confirm('Remove this item from cart?')) {
-                const productId = this.dataset.productId;
-                const input = cartForm.querySelector(`input[name="qty[${productId}]"]`);
-                setVisualFeedback(input, false); // Clear any visual feedback
-                updateQuantity(input, 0);
+
+    // 3. Manual na pag-type: hintayin matapos mag-type, i-clamp sa stock, saka i-submit kung nagbago
+    cartForm.querySelectorAll('.qty-input').forEach(input => {
+        let timer;
+
+        const commit = () => {
+            clearTimeout(timer);
+            const max = parseInt(input.dataset.maxQty, 10) || 0;
+            const requested = parseInt(input.value, 10) || 0;
+            const value = Math.min(Math.max(requested, 0), max);
+
+            if (requested > max) stockToast(input);
+            flagLimit(input, false);
+            input.value = value;
+
+            if (value === 0 && !confirm('Remove this item from your cart?')) {
+                input.value = input.dataset.original;
+                return;
             }
+            if (String(value) !== input.dataset.original) submitCart(input);
+        };
+
+        input.addEventListener('input', () => {
+            const max = parseInt(input.dataset.maxQty, 10) || 0;
+            flagLimit(input, (parseInt(input.value, 10) || 0) > max);
+            clearTimeout(timer);
+            timer = setTimeout(commit, 800);
+        });
+        input.addEventListener('change', commit);
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } });
+    });
+
+    // 4. Remove
+    cartForm.querySelectorAll('.item-remove').forEach(btn => {
+        btn.addEventListener('click', function () {
+            if (!confirm('Remove this item from your cart?')) return;
+            const input = inputFor(this.dataset.productId);
+            input.value = 0;
+            submitCart(input);
         });
     });
 });
 </script>
+
+<?php require_once __DIR__ . '/includes/footer.php'; ?>
