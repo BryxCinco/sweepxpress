@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/header.php';
+require_once __DIR__ . '/includes/product_card.php';
 
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
@@ -10,13 +11,25 @@ $stmt->execute([$id]);
 $p = $stmt->fetch();
 
 if (!$p) {
-    echo '<p class="alert alert-danger text-center mt-5">Product not found.</p>';
-    require 'includes/footer.php';
+    ?>
+    <div class="sx-container sx-section">
+        <div class="sx-card sx-empty">
+            <i class="fa-solid fa-box-open"></i>
+            <h3>Product not found</h3>
+            <p style="margin: 0 0 var(--sx-space-4)">It may have been removed or the link is incorrect.</p>
+            <a href="/sweepxpress/index.php" class="sx-btn sx-btn-outline sx-btn-sm">Back to shop</a>
+        </div>
+    </div>
+    <?php
+    require __DIR__ . '/includes/footer.php';
     exit;
 }
 
 // Determine stock availability for the main product
-$is_in_stock = ($p['stock_quantity'] ?? 0) > 0;
+$stockQty      = (int)($p['stock_quantity'] ?? 0);
+$is_in_stock   = $stockQty > 0;
+$lowStockLimit = 10; // pareho sa admin/inventory.php
+$isUserLoggedIn = is_logged_in();
 
 // Fetch product gallery images
 $stmt = $pdo->prepare("SELECT * FROM product_images WHERE product_id = ? ORDER BY id ASC");
@@ -40,1003 +53,305 @@ function getImagePath($filename) {
     return $placeholder;
 }
 
-$mainImage = getImagePath($p['image_path'] ?? ($images[0]['image_path'] ?? ''));
-$oldPrice = isset($p['old_price']) ? (float)$p['old_price'] : 0;
-$discount = ($oldPrice > $p['price'] && $oldPrice > 0) ? round(100 - ($p['price'] / $oldPrice * 100)) : 0;
+// Gallery: pangunahing larawan + product_images, walang doble
+$gallery = [];
+foreach (array_merge([$p['image_path'] ?? ''], array_column($images, 'image_path')) as $file) {
+    if (empty($file)) continue;
+    $src = getImagePath($file);
+    if (!in_array($src, $gallery, true)) $gallery[] = $src;
+}
+if (!$gallery) $gallery[] = getImagePath('');
+$mainImage = $gallery[0];
+
+// Related products: parehong category muna, saka may stock
+$stmt = $pdo->prepare("SELECT p.*, COALESCE(i.quantity, 0) AS stock_quantity
+                       FROM products p
+                       LEFT JOIN inventory i ON p.id = i.product_id
+                       WHERE p.id <> ?
+                       ORDER BY (p.category <=> ?) DESC, (COALESCE(i.quantity, 0) > 0) DESC, p.id DESC
+                       LIMIT 4");
+$stmt->execute([$id, $p['category']]);
+$related = $stmt->fetchAll();
+
+$categoryUrl = !empty($p['category'])
+    ? '/sweepxpress/index.php?category=' . urlencode($p['category']) . '#products'
+    : '/sweepxpress/index.php#products';
 ?>
 
 <style>
-/* ============================================
-   PRODUCT PAGE - PERFECT MATCH WITH INDEX.PHP
-   Same Design System, Consistent UX
-   ============================================ */
+/* ============================================================
+   PRODUCT DETAILS (Phase 9b) — tokens mula sa assets/style.css
+   ============================================================ */
+.pd { padding-block: var(--sx-space-5) var(--sx-space-8); }
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-:root {
-    /* Colors - SAME AS INDEX.PHP */
-    --primary: #2563eb;
-    --primary-dark: #1e40af;
-    --primary-light: #dbeafe;
-    
-    /* Neutrals */
-    --gray-50: #f9fafb;
-    --gray-100: #f3f4f6;
-    --gray-200: #e5e7eb;
-    --gray-300: #d1d5db;
-    --gray-400: #9ca3af;
-    --gray-500: #6b7280;
-    --gray-600: #4b5563;
-    --gray-700: #374151;
-    --gray-800: #1f2937;
-    --gray-900: #111827;
-    
-    /* Spacing */
-    --s-1: 8px;
-    --s-2: 12px;
-    --s-3: 16px;
-    --s-4: 20px;
-    --s-5: 24px;
-    --s-6: 32px;
-    
-    /* Typography */
-    --text-xs: 12px;
-    --text-sm: 14px;
-    --text-base: 16px;
-    --text-lg: 18px;
-    --text-xl: 20px;
-    --text-2xl: 24px;
-    
-    /* Radius */
-    --radius: 6px;
-    --radius-lg: 8px;
-    --radius-xl: 12px;
-    
-    /* Shadows */
-    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
-    --shadow: 0 1px 3px rgba(0,0,0,0.1);
-    --shadow-md: 0 4px 6px rgba(0,0,0,0.07);
-}
-
-body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    -webkit-font-smoothing: antialiased;
-    background: var(--gray-50);
-    color: var(--gray-900);
-}
-
-/* Container - SAME AS INDEX.PHP */
-.product-container {
-    max-width: 1140px;
-    margin: 0 auto;
-    padding: 0 var(--s-3);
-}
-
-/* Navigation */
-.nav-header {
+/* Breadcrumb */
+.pd-crumbs {
     display: flex;
-    justify-content: space-between;
+    flex-wrap: wrap;
     align-items: center;
-    margin-bottom: var(--s-3);
-    gap: var(--s-2);
+    gap: var(--sx-space-2);
+    margin-bottom: var(--sx-space-5);
+    font-size: var(--sx-text-sm);
+    color: var(--sx-muted);
+}
+.pd-crumbs a { color: var(--sx-muted); text-decoration: none; }
+.pd-crumbs a:hover { color: var(--sx-primary); }
+.pd-crumbs .fa-chevron-right { font-size: 0.65rem; opacity: 0.6; }
+.pd-crumbs [aria-current] { color: var(--sx-dark); font-weight: var(--sx-weight-semibold); }
+.pd-back {
+    display: inline-grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    margin-right: var(--sx-space-1);
+    border: 1px solid var(--sx-border);
+    border-radius: 50%;
+    background: var(--sx-surface);
 }
 
-.btn-back {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--s-1);
-    padding: var(--s-1) var(--s-2);
-    background: white;
-    border: 1px solid var(--gray-300);
-    border-radius: var(--radius);
-    font-size: var(--text-sm);
-    font-weight: 500;
-    color: var(--gray-700);
-    text-decoration: none;
-    transition: all 0.15s;
-}
-
-.btn-back:hover {
-    border-color: var(--primary);
-    color: var(--primary);
-}
-
-.breadcrumb {
-    display: flex;
-    align-items: center;
-    gap: var(--s-1);
-    font-size: var(--text-xs);
-    color: var(--gray-500);
-}
-
-.breadcrumb a {
-    color: var(--primary);
-    text-decoration: none;
-}
-
-.breadcrumb a:hover {
-    text-decoration: underline;
-}
-
-/* Skeleton - SAME SYSTEM AS INDEX.PHP */
-.skeleton {
-    background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%);
-    background-size: 200% 100%;
-    animation: shimmer 1.5s ease-in-out infinite;
-    border-radius: var(--radius);
-}
-
-@keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-}
-
-.skeleton-img { height: 320px; margin-bottom: var(--s-2); }
-.skeleton-thumbs { display: flex; gap: var(--s-1); margin-bottom: var(--s-4); }
-.skeleton-thumb { width: 60px; height: 60px; border-radius: var(--radius); }
-.skeleton-title { height: 28px; width: 80%; margin-bottom: var(--s-3); }
-.skeleton-price { height: 60px; margin-bottom: var(--s-3); border-radius: var(--radius-lg); }
-.skeleton-line { height: 14px; margin-bottom: var(--s-1); }
-.skeleton-feature { height: 36px; margin-bottom: var(--s-1); border-radius: var(--radius); }
-.skeleton-btn { height: 44px; margin-bottom: var(--s-1); border-radius: var(--radius-lg); }
-.skeleton-guarantee { height: 50px; margin-bottom: var(--s-1); border-radius: var(--radius); }
-.skeleton-section-title { height: 28px; width: 300px; margin: 0 auto var(--s-1); }
-.skeleton-section-subtitle { height: 16px; width: 200px; margin: 0 auto var(--s-4); }
-
-/* Skeleton visibility */
-#product-skeleton, #related-header-skeleton, #related-skeleton { display: block; }
-#product-real, #related-header-real, #related-real { display: none !important; }
-body.loaded #product-skeleton, body.loaded #related-header-skeleton, body.loaded #related-skeleton { display: none !important; }
-body.loaded #product-real { display: grid !important; }
-body.loaded #related-header-real { display: block !important; }
-body.loaded #related-real { display: grid !important; }
-
-/* Product Layout */
-.product-layout {
+/* Layout */
+.pd-layout {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--s-5);
-    background: white;
-    border: 1px solid var(--gray-200);
-    border-radius: var(--radius-xl);
-    padding: var(--s-5);
-    margin-bottom: var(--s-5);
+    gap: var(--sx-space-6);
+    align-items: start;
 }
 
 /* Gallery */
-.gallery {
-    position: sticky;
-    top: 80px;
-    height: fit-content;
+.pd-main {
+    aspect-ratio: 1 / 1;
+    border: 1px solid var(--sx-border-light);
+    background: var(--sx-surface-alt);
 }
-
-.main-img-wrapper {
-    position: relative;
-    background: var(--gray-100);
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-    margin-bottom: var(--s-2);
-    aspect-ratio: 1;
-}
-
-.main-img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-}
-
-.discount-badge {
-    position: absolute;
-    top: var(--s-2);
-    right: var(--s-2);
-    background: var(--danger);
-    color: white;
-    padding: 4px var(--s-2);
-    border-radius: 999px;
-    font-size: var(--text-xs);
-    font-weight: 600;
-}
-
-.thumbs {
+.pd-main img { transition: opacity 0.2s ease; }
+.pd-main .store-stock { top: var(--sx-space-4); right: var(--sx-space-4); font-size: var(--sx-text-xs); padding: 6px 12px; }
+.pd-thumbs {
     display: flex;
-    gap: var(--s-1);
+    gap: var(--sx-space-3);
+    margin-top: var(--sx-space-3);
     overflow-x: auto;
 }
-
-.thumbs::-webkit-scrollbar { display: none; }
-
-.thumb {
-    width: 60px;
-    height: 60px;
-    border-radius: var(--radius);
+.pd-thumb {
+    flex-shrink: 0;
+    width: 76px;
+    height: 76px;
+    padding: 0;
     border: 2px solid transparent;
+    border-radius: var(--sx-radius-md);
+    background: var(--sx-surface-alt);
+    overflow: hidden;
     cursor: pointer;
-    object-fit: cover;
-    transition: all 0.15s;
-    flex-shrink: 0;
+    opacity: 0.7;
+    transition: opacity var(--sx-transition), border-color var(--sx-transition);
 }
+.pd-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pd-thumb:hover { opacity: 1; }
+.pd-thumb.active { opacity: 1; border-color: var(--sx-primary); }
 
-.thumb:hover { border-color: var(--primary); }
-.thumb.active { border-color: var(--primary); }
-
-/* Product Info */
-.product-info {
+/* Info */
+.pd-title { margin-bottom: var(--sx-space-4); }
+.pd-price-row {
     display: flex;
-    flex-direction: column;
-}
-
-.product-title {
-    font-size: var(--text-2xl);
-    font-weight: 700;
-    color: var(--gray-900);
-    margin-bottom: var(--s-3);
-    line-height: 1.3;
-    letter-spacing: -0.01em;
-}
-
-.price-box {
-    display: flex;
-    align-items: center;
-    gap: var(--s-2);
-    padding: var(--s-3);
-    background: var(--primary-light);
-    border-radius: var(--radius-lg);
-    border-left: 3px solid var(--primary);
-    margin-bottom: var(--s-3);
     flex-wrap: wrap;
-}
-
-.current-price {
-    font-size: var(--text-2xl);
-    font-weight: 700;
-    color: var(--primary);
-}
-
-.old-price {
-    font-size: var(--text-base);
-    color: var(--gray-500);
-    text-decoration: line-through;
-}
-
-.save-badge {
-    padding: 4px var(--s-1);
-    background: rgba(220, 53, 69, 0.1);
-    color: var(--danger);
-    border-radius: 999px;
-    font-size: var(--text-xs);
-    font-weight: 600;
-}
-
-.product-desc {
-    font-size: var(--text-sm);
-    color: var(--gray-600);
-    line-height: 1.6;
-    margin-bottom: var(--s-3);
-    padding-bottom: var(--s-3);
-    border-bottom: 1px solid var(--gray-200);
-}
-
-.features {
-    display: flex;
-    flex-direction: column;
-    gap: var(--s-1);
-    padding: var(--s-2);
-    background: var(--gray-50);
-    border: 1px solid var(--gray-200);
-    border-radius: var(--radius-lg);
-    margin-bottom: var(--s-3);
-}
-
-.feature {
-    display: flex;
     align-items: center;
-    gap: var(--s-1);
-    font-size: var(--text-sm);
-    color: var(--gray-700);
+    gap: var(--sx-space-3);
+    margin-bottom: var(--sx-space-5);
 }
-
-.feature-icon {
-    width: 20px;
-    height: 20px;
-    background: var(--primary-light);
-    border-radius: 4px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--primary);
-    font-size: 11px;
-    flex-shrink: 0;
-    font-weight: 600;
+.pd-price {
+    font-size: var(--sx-text-3xl);
+    font-weight: var(--sx-weight-extrabold);
+    letter-spacing: var(--sx-tracking-tight);
+    color: var(--sx-dark);
 }
-
-.actions {
+.pd-avail { position: static; backdrop-filter: none; -webkit-backdrop-filter: none; font-size: var(--sx-text-xs); padding: 6px 12px; }
+.pd-desc {
+    margin-bottom: var(--sx-space-5);
+    line-height: 1.7;
+    color: var(--sx-text);
+}
+.pd-specs {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--sx-space-2) var(--sx-space-5);
+    margin: 0 0 var(--sx-space-5);
+    padding: var(--sx-space-4) var(--sx-space-5);
+    border: 1px solid var(--sx-border-light);
+    border-radius: var(--sx-radius-lg);
+    background: var(--sx-surface-alt);
+    font-size: var(--sx-text-sm);
+}
+.pd-specs dt { color: var(--sx-muted); font-weight: var(--sx-weight-medium); }
+.pd-specs dd { margin: 0; color: var(--sx-dark); font-weight: var(--sx-weight-semibold); }
+.pd-specs .mono { font-family: var(--sx-font-mono); }
+.pd-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: var(--s-2);
-    margin-bottom: var(--s-3);
+    gap: var(--sx-space-3);
+    margin-bottom: var(--sx-space-6);
 }
-
-.btn-cart, .btn-buy {
-    padding: 11px var(--s-3);
-    border-radius: var(--radius-lg);
-    font-size: var(--text-base);
-    font-weight: 600;
-    border: none;
-    cursor: pointer;
-    transition: all 0.15s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--s-1);
-}
-
-.btn-cart {
-    background: white;
-    color: var(--primary);
-    border: 2px solid var(--primary);
-}
-
-.btn-cart:hover { background: var(--primary-light); }
-
-.btn-buy {
-    background: var(--primary);
-    color: white;
-}
-
-.btn-buy:hover { background: var(--primary-dark); }
-
-.btn-buy:disabled, .btn-cart:disabled {
-    background: var(--gray-400);
-    border-color: var(--gray-400);
-    cursor: not-allowed;
-    opacity: 0.7;
-}
-
-.guarantees {
-    display: flex;
-    flex-direction: column;
-    gap: var(--s-2);
-    padding: var(--s-2);
-    background: var(--gray-50);
-    border: 1px solid var(--gray-200);
-    border-radius: var(--radius-lg);
-}
-
-.guarantee {
-    display: flex;
-    align-items: center;
-    gap: var(--s-2);
-}
-
-.guarantee-icon {
-    width: 32px;
-    height: 32px;
-    background: white;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: var(--text-base);
-    flex-shrink: 0;
-}
-
-.guarantee-text strong {
-    display: block;
-    font-size: var(--text-sm);
-    font-weight: 600;
-    color: var(--gray-900);
-    margin-bottom: 2px;
-}
-
-.guarantee-text span {
-    font-size: var(--text-xs);
-    color: var(--gray-500);
-}
-
-/* Related Products - EXACT SAME AS INDEX.PHP */
-.related { margin-bottom: var(--s-6); }
-
-.section-header {
-    text-align: center;
-    margin-bottom: var(--s-4);
-}
-
-.section-title {
-    font-size: var(--text-2xl);
-    font-weight: 700;
-    color: var(--gray-900);
-    margin-bottom: var(--s-1);
-}
-
-.section-subtitle {
-    font-size: var(--text-sm);
-    color: var(--gray-500);
-}
-
-.products-grid {
+.pd-actions .sx-btn { width: 100%; }
+.pd-perks {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: var(--s-3);
+    gap: var(--sx-space-4);
+    padding-top: var(--sx-space-5);
+    border-top: 1px solid var(--sx-border-light);
 }
 
-/* SAME PRODUCT CARD AS INDEX.PHP */
-.product-card {
-    background: white;
-    border: 1px solid var(--gray-200);
-    border-radius: var(--radius-lg);
-    overflow: hidden;
+/* Related */
+.pd-related { padding-top: var(--sx-space-8); }
+.pd-related-head {
     display: flex;
-    flex-direction: column;
-    transition: all 0.15s;
-    position: relative;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--sx-space-3);
+    margin-bottom: var(--sx-space-5);
 }
 
-.product-card:hover {
-    box-shadow: var(--shadow-md);
-    transform: translateY(-2px);
+@media (min-width: 992px) {
+    .pd-layout { grid-template-columns: 1.05fr 1fr; gap: var(--sx-space-8); }
+    .pd-gallery { position: sticky; top: 96px; }
 }
-
-/* OUT OF STOCK BADGE - SAME AS INDEX.PHP */
-.product-card.out-of-stock::before {
-    content: 'Out of Stock';
-    position: absolute;
-    top: var(--s-2);
-    left: var(--s-2);
-    background: rgba(0,0,0,0.75);
-    color: white;
-    padding: 4px var(--s-2);
-    border-radius: 999px;
-    font-size: var(--text-xs);
-    font-weight: 600;
-    z-index: 2;
-}
-
-.card-img-wrapper {
-    position: relative;
-    width: 100%;
-    height: 180px;
-    background: var(--gray-100);
-    overflow: hidden;
-}
-
-.card-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    opacity: 0;
-    transition: opacity 0.3s;
-}
-
-.card-img.loaded {
-    opacity: 1;
-}
-
-.card-img.grayscale {
-    filter: grayscale(100%);
-}
-
-.card-body {
-    padding: var(--s-3);
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-}
-
-.card-title {
-    font-size: var(--text-base);
-    font-weight: 600;
-    color: var(--gray-900);
-    margin-bottom: var(--s-1);
-    line-height: 1.3;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-}
-
-.card-title a {
-    color: inherit;
-    text-decoration: none;
-}
-
-.card-title a:hover {
-    color: var(--primary);
-}
-
-.card-price {
-    font-size: var(--text-lg);
-    font-weight: 700;
-    color: var(--primary);
-    margin-bottom: var(--s-2);
-}
-
-.card-desc {
-    font-size: var(--text-sm);
-    color: var(--gray-600);
-    line-height: 1.5;
-    margin-bottom: var(--s-3);
-    flex: 1;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-}
-
-.card-actions {
-    display: flex;
-    flex-direction: column;
-    gap: var(--s-1);
-}
-
-.btn-card {
-    padding: 10px var(--s-3);
-    border-radius: var(--radius-lg);
-    font-size: var(--text-base);
-    font-weight: 600;
-    text-align: center;
-    text-decoration: none;
-    transition: all 0.15s;
-    cursor: pointer;
-}
-
-.btn-card-primary {
-    background: var(--primary);
-    color: white;
-    border: none;
-}
-
-.btn-card-primary:hover {
-    background: var(--primary-dark);
-    color: white;
-}
-
-.btn-card-primary:disabled {
-    background: var(--gray-400);
-    cursor: not-allowed;
-}
-
-.btn-card-secondary {
-    background: white;
-    color: var(--primary);
-    border: 1px solid var(--primary);
-    display: block;
-}
-
-.btn-card-secondary:hover {
-    background: var(--primary-light);
-    color: var(--primary-dark);
-}
-
-/* Responsive - SAME AS INDEX.PHP */
-@media (max-width: 768px) {
-    .product-container { padding: 0 var(--s-2); }
-    
-    .nav-header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: var(--s-1);
-    }
-    
-    .breadcrumb { font-size: 11px; }
-    
-    .product-layout {
-        grid-template-columns: 1fr;
-        gap: var(--s-3);
-        padding: var(--s-3);
-    }
-    
-    .gallery { position: static; }
-    
-    .main-img-wrapper {
-        height: 280px;
-        aspect-ratio: auto;
-    }
-    
-    .product-title { font-size: var(--text-xl); margin-bottom: var(--s-2); }
-    
-    .price-box { padding: var(--s-2); margin-bottom: var(--s-2); }
-    
-    .current-price { font-size: var(--text-xl); }
-    
-    .product-desc {
-        font-size: var(--text-sm);
-        margin-bottom: var(--s-2);
-        padding-bottom: var(--s-2);
-    }
-    
-    .features { padding: var(--s-2); margin-bottom: var(--s-2); }
-    
-    .actions {
-        grid-template-columns: 1fr;
-        gap: var(--s-1);
-        margin-bottom: var(--s-2);
-    }
-    
-    .btn-cart, .btn-buy {
-        padding: 10px var(--s-2);
-        font-size: var(--text-sm);
-    }
-    
-    .guarantees { padding: var(--s-2); gap: var(--s-2); }
-    
-    .guarantee-icon { width: 28px; height: 28px; font-size: var(--text-sm); }
-    
-    .guarantee-text strong { font-size: var(--text-xs); }
-    
-    .guarantee-text span { font-size: 11px; }
-    
-    .section-title { font-size: var(--text-xl); }
-    
-    .products-grid {
-        grid-template-columns: repeat(2, 1fr);
-        gap: var(--s-2);
-    }
-    
-    .card-img-wrapper { height: 140px; }
-    
-    .card-body { padding: var(--s-2); }
-    
-    .card-title { font-size: var(--text-sm); }
-    
-    .card-price { font-size: var(--text-base); }
-    
-    .btn-card { padding: 8px var(--s-2); font-size: var(--text-sm); }
-}
-
-@media (max-width: 480px) {
-    .main-img-wrapper { height: 240px; }
-    
-    .product-title { font-size: var(--text-lg); }
-    
-    .current-price { font-size: var(--text-lg); }
-    
-    .btn-cart, .btn-buy {
-        font-size: var(--text-xs);
-        padding: 9px var(--s-2);
-    }
-    
-    .actions form { display: block; width: 100%; }
-    .actions form .btn-buy { width: 100%; }
+@media (max-width: 575.98px) {
+    .pd-price { font-size: var(--sx-text-2xl); }
+    .pd-actions { grid-template-columns: 1fr; }
+    .pd-thumb { width: 64px; height: 64px; }
 }
 </style>
 
-<div class="product-container">
-    <div class="nav-header">
-        <a href="/sweepxpress/index.php" class="btn-back">
-            <i class="bi bi-arrow-left"></i>
-            Back
-        </a>
-        
-        <nav class="breadcrumb">
-            <a href="/sweepxpress/index.php">Home</a>
-            <span>/</span>
-            <a href="/sweepxpress/index.php">Products</a>
-            <span>/</span>
-            <span><?php echo htmlspecialchars($p['name']); ?></span>
-        </nav>
-    </div>
+<div class="pd sx-container">
 
-    <!-- Skeleton -->
-    <div class="product-layout" id="product-skeleton">
-        <div class="gallery">
-            <div class="skeleton skeleton-img"></div>
-            <div class="skeleton-thumbs">
-                <div class="skeleton skeleton-thumb"></div>
-                <div class="skeleton skeleton-thumb"></div>
-                <div class="skeleton skeleton-thumb"></div>
-            </div>
-        </div>
-        <div class="product-info">
-            <div class="skeleton skeleton-title"></div>
-            <div class="skeleton skeleton-price"></div>
-            <div class="skeleton skeleton-line" style="width:100%; margin-bottom:8px"></div>
-            <div class="skeleton skeleton-line" style="width:95%; margin-bottom:8px"></div>
-            <div class="skeleton skeleton-line" style="width:80%; margin-bottom:16px"></div>
-            <div class="skeleton skeleton-feature"></div>
-            <div class="skeleton skeleton-feature"></div>
-            <div class="skeleton skeleton-feature" style="margin-bottom:16px"></div>
-            <div class="actions">
-                <div class="skeleton skeleton-btn"></div>
-                <div class="skeleton skeleton-btn"></div>
-            </div>
-            <div class="skeleton skeleton-guarantee"></div>
-            <div class="skeleton skeleton-guarantee"></div>
-            <div class="skeleton skeleton-guarantee"></div>
-        </div>
-    </div>
+    <!-- Breadcrumb -->
+    <nav class="pd-crumbs" aria-label="Breadcrumb">
+        <a href="/sweepxpress/index.php" class="pd-back" aria-label="Back to shop"><i class="fa-solid fa-arrow-left"></i></a>
+        <a href="/sweepxpress/index.php">Shop</a>
+        <?php if (!empty($p['category'])): ?>
+            <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+            <a href="<?php echo h($categoryUrl); ?>"><?php echo h($p['category']); ?></a>
+        <?php endif; ?>
+        <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+        <span aria-current="page"><?php echo h($p['name']); ?></span>
+    </nav>
 
-    <!-- Real Product -->
-    <div class="product-layout" id="product-real">
-        <div class="gallery">
-            <div class="main-img-wrapper">
-                <img id="mainImg" src="<?php echo htmlspecialchars($mainImage); ?>" alt="<?php echo htmlspecialchars($p['name']); ?>" class="main-img">
-                <?php if ($discount > 0): ?>
-                    <div class="discount-badge"><?php echo $discount; ?>% OFF</div>
+    <div class="pd-layout">
+        <!-- Gallery -->
+        <div class="pd-gallery">
+            <div class="sx-media pd-main">
+                <img id="mainImg" src="<?php echo h($mainImage); ?>" alt="<?php echo h($p['name']); ?>" fetchpriority="high">
+                <?php if (!$is_in_stock): ?>
+                    <span class="store-stock out">Out of stock</span>
+                <?php elseif ($stockQty <= $lowStockLimit): ?>
+                    <span class="store-stock low">Only <?php echo $stockQty; ?> left</span>
                 <?php endif; ?>
             </div>
-            <?php if (!empty($images)): ?>
-                <div class="thumbs">
-                    <?php foreach ($images as $index => $img): ?>
-                        <img src="<?php echo htmlspecialchars(getImagePath($img['image_path'])); ?>" 
-                             class="thumb <?php echo $index === 0 ? 'active' : ''; ?>" 
-                             onclick="changeMainImage(this)">
+            <?php if (count($gallery) > 1): ?>
+                <div class="pd-thumbs">
+                    <?php foreach ($gallery as $index => $src): ?>
+                        <button type="button" class="pd-thumb <?php echo $index === 0 ? 'active' : ''; ?>"
+                                onclick="changeMainImage(this)" aria-label="View image <?php echo $index + 1; ?>">
+                            <img src="<?php echo h($src); ?>" alt="">
+                        </button>
                     <?php endforeach; ?>
                 </div>
             <?php endif; ?>
         </div>
 
-        <div class="product-info">
-            <h1 class="product-title"><?php echo htmlspecialchars($p['name']); ?></h1>
-            
-            <div class="price-box">
-                <span class="current-price">₱<?php echo number_format($p['price'], 2); ?></span>
-                <?php if ($discount > 0): ?>
-                    <span class="old-price">₱<?php echo number_format($oldPrice, 2); ?></span>
-                    <span class="save-badge">SAVE <?php echo $discount; ?>%</span>
-                <?php endif; ?>
-            </div>
+        <!-- Info -->
+        <div class="pd-info">
+            <?php if (!empty($p['category'])): ?>
+                <span class="sx-eyebrow"><?php echo h($p['category']); ?></span>
+            <?php endif; ?>
+            <h1 class="sx-heading-lg pd-title"><?php echo h($p['name']); ?></h1>
 
-            <div class="product-desc">
-                <?php echo nl2br(htmlspecialchars($p['description'])); ?>
-            </div>
-
-            <div class="features">
-                <div class="feature">
-                    <div class="feature-icon">✓</div>
-                    <span>High-quality materials</span>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">⚡</div>
-                    <span>Durable and long-lasting</span>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">🔧</div>
-                    <span>Easy to use and maintain</span>
-                </div>
-            </div>
-
-            <div class="actions">
-                <?php if ($is_in_stock): ?>
-                    <button class="btn-cart" onclick="addToCart(<?php echo (int)$p['id']; ?>)">
-                        <i class="bi bi-cart-plus"></i>
-                        Add to Cart
-                    </button>
-                    
-                    <form method="POST" action="/sweepxpress/buy_now_checkout.php" style="display:contents;">
-                        <input type="hidden" name="productid" value="<?php echo (int)$p['id']; ?>">
-                        <button type="submit" class="btn-buy" onclick="buyNow(<?= (int)$p['id'] ?>)">
-                            <i class="bi bi-lightning-charge"></i>
-                            Buy Now
-                        </button>
-                    </form>
+            <div class="pd-price-row">
+                <span class="pd-price">₱<?php echo number_format((float)$p['price'], 2); ?></span>
+                <?php if (!$is_in_stock): ?>
+                    <span class="store-stock out pd-avail">Out of stock</span>
+                <?php elseif ($stockQty <= $lowStockLimit): ?>
+                    <span class="store-stock low pd-avail">Low stock</span>
                 <?php else: ?>
-                    <button class="btn-buy" disabled style="grid-column: 1 / -1;">
-                        <i class="bi bi-x-circle"></i>
-                        Out of Stock
-                    </button>
+                    <span class="store-stock in pd-avail"><i class="fa-solid fa-check"></i> In stock</span>
                 <?php endif; ?>
             </div>
 
-            <div class="guarantees">
-                <div class="guarantee">
-                    <div class="guarantee-icon">🚚</div>
-                    <div class="guarantee-text">
-                        <strong>Fast Delivery</strong>
-                        <span>2-3 business days</span>
-                    </div>
+            <?php if (!empty($p['description'])): ?>
+                <div class="pd-desc"><?php echo nl2br(h($p['description'])); ?></div>
+            <?php endif; ?>
+
+            <dl class="pd-specs">
+                <?php if (!empty($p['sku'])): ?>
+                    <dt>SKU</dt><dd class="mono"><?php echo h($p['sku']); ?></dd>
+                <?php endif; ?>
+                <dt>Category</dt><dd><?php echo h($p['category'] ?: 'Uncategorized'); ?></dd>
+                <dt>Availability</dt>
+                <dd>
+                    <?php if (!$is_in_stock): ?>
+                        Out of stock
+                    <?php elseif ($stockQty <= $lowStockLimit): ?>
+                        Only <?php echo $stockQty; ?> left
+                    <?php else: ?>
+                        <?php echo $stockQty; ?> available
+                    <?php endif; ?>
+                </dd>
+            </dl>
+
+            <div class="pd-actions">
+                <?php if ($is_in_stock && $isUserLoggedIn): ?>
+                    <button type="button" class="sx-btn sx-btn-primary sx-btn-lg" onclick="sxAddToCart(<?php echo (int)$p['id']; ?>, this)">
+                        <i class="fa-solid fa-cart-plus"></i> Add to Cart
+                    </button>
+                    <button type="button" class="sx-btn sx-btn-dark sx-btn-lg sx-btn-arrow" onclick="sxBuyNow(<?php echo (int)$p['id']; ?>, this)">
+                        Buy Now <span class="sx-btn-icon"><i class="fa-solid fa-arrow-right"></i></span>
+                    </button>
+                <?php elseif ($is_in_stock): ?>
+                    <a href="/sweepxpress/login.php" class="sx-btn sx-btn-primary sx-btn-lg"><i class="fa-solid fa-right-to-bracket"></i> Log in to order</a>
+                    <a href="/sweepxpress/register.php" class="sx-btn sx-btn-outline sx-btn-lg">Create an account</a>
+                <?php else: ?>
+                    <button type="button" class="sx-btn sx-btn-outline sx-btn-lg" disabled><i class="fa-solid fa-ban"></i> Out of stock</button>
+                    <a href="<?php echo h($categoryUrl); ?>" class="sx-btn sx-btn-ghost sx-btn-lg">Browse similar</a>
+                <?php endif; ?>
+            </div>
+
+            <div class="pd-perks">
+                <div class="sx-feature">
+                    <div class="sx-feature-icon"><i class="fa-solid fa-money-bill-wave"></i></div>
+                    <div><p class="sx-feature-title">Cash on delivery</p><p class="sx-feature-text">Pay when your order arrives.</p></div>
                 </div>
-                <div class="guarantee">
-                    <div class="guarantee-icon">↩️</div>
-                    <div class="guarantee-text">
-                        <strong>Easy Returns</strong>
-                        <span>7-day return policy</span>
-                    </div>
+                <div class="sx-feature">
+                    <div class="sx-feature-icon"><i class="fa-solid fa-truck-fast"></i></div>
+                    <div><p class="sx-feature-title">Order tracking</p><p class="sx-feature-text">Follow your order from preparing to delivered.</p></div>
                 </div>
-                <div class="guarantee">
-                    <div class="guarantee-icon">🔒</div>
-                    <div class="guarantee-text">
-                        <strong>Secure Payment</strong>
-                        <span>Protected checkout</span>
-                    </div>
+                <div class="sx-feature">
+                    <div class="sx-feature-icon"><i class="fa-solid fa-file-invoice"></i></div>
+                    <div><p class="sx-feature-title">Business orders</p><p class="sx-feature-text">Bulk purchase orders with payment terms.</p></div>
                 </div>
             </div>
         </div>
     </div>
-</div>
 
-<?php
-// Related products - SAME QUERY AS BEFORE
-$stmt = $pdo->query("SELECT p.*, COALESCE(i.quantity, 0) AS stock_quantity FROM products p LEFT JOIN inventory i ON p.id = i.product_id WHERE p.id != $id ORDER BY p.id DESC LIMIT 8");
-$products = $stmt->fetchAll();
-?>
-
-<div class="product-container related">
-    <!-- Related Skeleton -->
-    <div class="section-header" id="related-header-skeleton">
-        <div class="skeleton skeleton-section-title"></div>
-        <div class="skeleton skeleton-section-subtitle"></div>
-    </div>
-
-    <div class="section-header" id="related-header-real">
-        <h2 class="section-title">You May Also Like</h2>
-        <p class="section-subtitle">Discover more products from our collection</p>
-    </div>
-
-    <div class="products-grid" id="related-skeleton">
-        <?php for ($i = 0; $i < 8; $i++): ?>
-            <div class="product-card">
-                <div class="skeleton skeleton-card-img"></div>
-                <div class="card-body">
-                    <div class="skeleton skeleton-line-lg" style="width: 85%;"></div>
-                    <div class="skeleton skeleton-line" style="width: 40%;"></div>
-                    <div class="skeleton skeleton-line" style="width: 100%;"></div>
-                    <div class="skeleton skeleton-line" style="width: 80%; margin-bottom: var(--s-3);"></div>
-                    <div class="skeleton skeleton-btn"></div>
-                    <div class="skeleton skeleton-btn"></div>
-                </div>
+    <?php if ($related): ?>
+    <section class="pd-related">
+        <div class="pd-related-head">
+            <div>
+                <span class="sx-eyebrow">You may also like</span>
+                <h2 class="sx-heading-md"><?php echo !empty($p['category']) ? 'More in ' . h($p['category']) : 'More products'; ?></h2>
             </div>
-        <?php endfor; ?>
-    </div>
-
-    <!-- Related Real - SAME STRUCTURE AS INDEX.PHP -->
-    <div class="products-grid" id="related-real">
-        <?php foreach ($products as $prod): 
-            $imgPath = getImagePath($prod['image_path']);
-            $prodOldPrice = isset($prod['old_price']) ? (float)$prod['old_price'] : 0;
-            $is_related_in_stock = ($prod['stock_quantity'] ?? 0) > 0;
-        ?>
-            <div class="product-card <?php echo !$is_related_in_stock ? 'out-of-stock' : ''; ?>">
-                <div class="card-img-wrapper">
-                    <img data-src="<?php echo htmlspecialchars($imgPath); ?>"
-                         src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Crect fill='%23f3f4f6' width='400' height='400'/%3E%3C/svg%3E"
-                         class="card-img <?php echo !$is_related_in_stock ? 'grayscale' : ''; ?>"
-                         alt="<?php echo htmlspecialchars($prod['name']); ?>"
-                         loading="lazy"
-                         onerror="this.src='/sweepxpress/assets/placeholder.jpg'; this.classList.add('loaded');">
-                </div>
-                <div class="card-body">
-                    <h3 class="card-title">
-                        <a href="product.php?id=<?php echo (int)$prod['id']; ?>">
-                            <?php echo htmlspecialchars($prod['name']); ?>
-                        </a>
-                    </h3>
-                    <div class="card-price">₱<?php echo number_format($prod['price'], 2); ?></div>
-                    <?php if (!empty($prod['description'])): ?>
-                    <p class="card-desc"><?php echo htmlspecialchars(substr($prod['description'], 0, 80)); ?>...</p>
-                    <?php endif; ?>
-                    <div class="card-actions">
-                        <?php if ($is_related_in_stock): ?>
-                            <button class="btn-card btn-card-primary" onclick="addToCart(<?php echo (int)$prod['id']; ?>)">
-                                Add to Cart
-                            </button>
-                        <?php else: ?>
-                            <button class="btn-card btn-card-primary" disabled>
-                                Out of Stock
-                            </button>
-                        <?php endif; ?>
-                        <a href="product.php?id=<?php echo (int)$prod['id']; ?>" class="btn-card btn-card-secondary">
-                            View Details
-                        </a>
-                    </div>
-                </div>
-            </div>
-        <?php endforeach; ?>
-    </div>
+            <a href="<?php echo h($categoryUrl); ?>" class="sx-btn sx-btn-outline sx-btn-sm">View all <i class="fa-solid fa-arrow-right"></i></a>
+        </div>
+        <div class="store-grid">
+            <?php foreach ($related as $prod) sx_product_card($prod, $isUserLoggedIn); ?>
+        </div>
+    </section>
+    <?php endif; ?>
 </div>
 
 <script>
-// SAME LOADING SYSTEM AS INDEX.PHP
-document.addEventListener('DOMContentLoaded', function() {
-    const minDisplay = 600;
-    const startTime = Date.now();
-    
-    function showContent() {
-        const elapsed = Date.now() - startTime;
-        const remaining = Math.max(0, minDisplay - elapsed);
-        
-        setTimeout(function() {
-            document.body.classList.add('loaded');
-            
-            // Lazy load images
-            const lazyImages = document.querySelectorAll('img[data-src]');
-            if ('IntersectionObserver' in window) {
-                const observer = new IntersectionObserver(function(entries) {
-                    entries.forEach(function(entry) {
-                        if (entry.isIntersecting) {
-                            const img = entry.target;
-                            const src = img.dataset.src;
-                            
-                            if (src && src !== 'null') {
-                                const tempImg = new Image();
-                                tempImg.onload = function() {
-                                    img.src = src;
-                                    img.classList.add('loaded');
-                                };
-                                tempImg.onerror = function() {
-                                    img.src = '/sweepxpress/assets/placeholder.jpg';
-                                    img.classList.add('loaded');
-                                };
-                                tempImg.src = src;
-                            }
-                            img.removeAttribute('data-src');
-                            observer.unobserve(img);
-                        }
-                    });
-                }, { rootMargin: '50px' });
-                
-                lazyImages.forEach(img => observer.observe(img));
-            }
-        }, remaining);
-    }
-    
-    if (document.readyState === 'complete') {
-        showContent();
-    } else {
-        window.addEventListener('load', showContent);
-    }
-});
-</script>
-
-<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-
-<script>
-// SAME FUNCTIONS AS BEFORE
 function changeMainImage(thumb) {
-    document.getElementById('mainImg').src = thumb.src;
-    document.querySelectorAll('.thumb').forEach(t => t.classList.remove('active'));
+    document.getElementById('mainImg').src = thumb.querySelector('img').src;
+    document.querySelectorAll('.pd-thumb').forEach(t => t.classList.remove('active'));
     thumb.classList.add('active');
 }
 
-function addToCart(productId) {
-    fetch(window.location.origin + '/sweepxpress/api/add_to_cart.php', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'product_id=' + encodeURIComponent(productId)
-    })
-    .then(res => res.json())
-    .then(data => {
-        if (data.success) {
-            if (typeof updateCartBadge === 'function') updateCartBadge(data.count);
-            Swal.fire({
-                icon: 'success',
-                title: 'Added to Cart!',
-                text: data.message,
-                timer: 2000,
-                showConfirmButton: false
-            });
-        } else {
-            Swal.fire({
-                icon: 'error',
-                title: 'Oops...',
-                text: data.message
-            });
-        }
-    })
-    .catch(err => console.error('Error:', err));
-}
-
-function buyNow(productId) {
-    fetch(window.location.origin + '/sweepxpress/api/buy_now.php', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'product_id=' + encodeURIComponent(productId)
-    })
-    .then(res => res.json())
-    .then(data => {
-        if (data.status === 'success') {
-            window.location.href = data.redirect;
-        } else {
-            Swal.fire({
-                icon: 'error',
-                title: 'Error',
-                text: data.message
-            }).then(() => {
-                if (data.redirect) window.location.href = data.redirect;
-            });
-        }
-    })
-    .catch(err => console.error('Error:', err));
-}
+document.addEventListener('DOMContentLoaded', () => sxLazyImages());
 </script>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
