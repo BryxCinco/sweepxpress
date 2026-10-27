@@ -1,133 +1,109 @@
 <?php
+// admin/add_product.php — bagong produkto (iisang add page; tinanggal ang dobleng form sa products.php)
+if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/admin_auth.php';
 require_once __DIR__ . '/../includes/auth.php';
-require_once __DIR__ . '/../includes/header.php';
+require_once __DIR__ . '/../includes/admin_products.php';
 
-$message = '';
-$name = '';
-$price = 0;
-$desc = '';
+$values = ['name' => '', 'sku' => '', 'category' => '', 'price' => '', 'description' => ''];
+$errors = [];
 
-// --- FORM HANDLING: CREATE PRODUCT LOGIC ---
+// Processing bago ang header (dati: pagkatapos, kaya hindi gumagana ang redirect)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $name = trim($_POST['name'] ?? '');
-    $desc = trim($_POST['description'] ?? '');
-    $price = filter_var($_POST['price'] ?? 0, FILTER_VALIDATE_FLOAT);
-    $imagePath = null;
-    $errors = [];
+    [$values, $errors] = sx_product_input();
+    if (!sx_csrf_ok()) $errors[] = 'Your session expired. Please try again.';
 
-    // Basic Validation
-    if ($name === '') $errors[] = 'Name is required.';
-    if ($desc === '') $errors[] = 'Description is required.';
-    if ($price === false || $price < 0) $errors[] = 'Valid price is required.';
-
-    // Image Upload Logic (for the primary image)
-    if (empty($errors) && isset($_FILES['image']) && $_FILES['image']['error'] === UPLOAD_ERR_OK) {
-        $file = $_FILES['image'];
-        $allowedTypes = ['image/jpeg', 'image/png', 'image/gif'];
-        $maxSize = 2000000; // 2MB
-        $uploadDir = realpath(__DIR__ . '/../') . '/uploads/';
-
-        if (!is_dir($uploadDir) || !is_writable($uploadDir)) {
-            die('<div class="alert alert-danger">❌ Upload directory error. Please check permissions.</div>');
-        }
-
-        if (in_array(mime_content_type($file['tmp_name']), $allowedTypes) && $file['size'] <= $maxSize) {
-            $extension = pathinfo($file['name'], PATHINFO_EXTENSION);
-            $safeName = time() . '_' . uniqid() . '.' . $extension; // More unique name
-            $destination = $uploadDir . $safeName;
-
-            if (move_uploaded_file($file['tmp_name'], $destination)) {
-                // IMPORTANT: Use the correct web path
-                $imagePath = '/sweepxpress/uploads/' . $safeName;
-            } else {
-                $errors[] = 'Failed to move uploaded file.';
-            }
+    if (!$errors) {
+        if ($values['sku'] === '') {
+            $values['sku'] = sx_generate_sku($pdo, $values['name']) ?? '';
+            if ($values['sku'] === '') $errors[] = 'Could not generate a SKU. Please enter one.';
         } else {
-            $errors[] = 'Invalid file type or file too large (Max 2MB, JPG/PNG/GIF).';
+            $dup = $pdo->prepare("SELECT 1 FROM products WHERE sku = ?");
+            $dup->execute([$values['sku']]);
+            if ($dup->fetch()) $errors[] = 'That SKU is already used by another product.';
         }
-    } else if (empty($errors) && isset($_FILES['image']) && $_FILES['image']['error'] !== UPLOAD_ERR_NO_FILE) {
-        // Handle other upload errors besides no file selected
-        $errors[] = 'Image upload error: Code ' . $_FILES['image']['error'];
     }
-    
-    // Database Insertion
-    if (empty($errors)) {
-        try {
-            // Default stock to 0 for a new product, assuming a stock column exists
-            $stmt = $pdo->prepare("INSERT INTO products (name, description, price, image_path, stock) VALUES (?, ?, ?, ?, 0)");
-            $stmt->execute([$name, $desc, $price, $imagePath]);
-            
-            // Redirect after successful creation
-            $newId = $pdo->lastInsertId();
-            header("Location: edit_product.php?id=$newId&status=success_add");
-            exit;
 
+    $image = ['path' => null];
+    if (!$errors) {
+        $image = sx_save_product_image($_FILES['image'] ?? []);
+        if (isset($image['error'])) $errors[] = $image['error'];
+    }
+
+    if (!$errors) {
+        try {
+            $pdo->prepare("INSERT INTO products (sku, name, description, price, category, image_path, stock) VALUES (?, ?, ?, ?, ?, ?, 0)")
+                ->execute([$values['sku'], $values['name'], $values['description'], (float)$values['price'], $values['category'], $image['path']]);
+            $newId = (int)$pdo->lastInsertId();
+            sx_flash(['success', "“{$values['name']}” was added. Add stock so customers can order it."]);
+            header("Location: edit_product.php?id={$newId}");
+            exit;
         } catch (PDOException $e) {
             error_log("Product insertion error: " . $e->getMessage());
-            $message = '<div class="alert alert-danger">Database error while adding product.</div>';
+            sx_delete_upload($image['path']);
+            $errors[] = 'Could not save the product. Please try again.';
         }
-    } else {
-        $message = '<div class="alert alert-warning">⚠ ' . htmlspecialchars(implode('<br>', $errors)) . '</div>';
     }
-
-    // Preserve form data on error
-    $price = (float)$_POST['price'] ?? $price; // Use POST value if validation fails
 }
 
-// Display messages (success/error)
-if (isset($_GET['status']) && $_GET['status'] === 'success_add') {
-    $message = '<div class="alert alert-success">✅ Product created successfully! You can now add more images.</div>';
-}
-if (!empty($message)) echo $message;
+$categories = sx_product_categories($pdo);
+$csrf = sx_csrf_token();
 
-// Set default values for the form (useful if validation fails)
-// $name, $price, $desc are already set above based on POST or initial values.
-
+require_once __DIR__ . '/../includes/header.php';
 ?>
-<div class="container-fluid min-vh-100 bg-light px-0 py-4">
-    
-    <div class="d-flex justify-content-between align-items-center mb-4 px-4 px-lg-5">
-        <h1 class="display-6 fw-bold text-primary">Add New Product</h1>
-        <a href="products.php" class="btn btn-secondary shadow-sm">
-            ← Back to Products List
-        </a>
-    </div>
 
-    <div class="card shadow-lg border-0 w-100">
-        <div class="card-header bg-white border-bottom py-3 px-4 px-lg-5">
-            <h3 class="mb-0 text-dark">Product Details</h3>
-        </div>
-        <div class="card-body p-4 p-lg-5">
-            <form method="post" enctype="multipart/form-data">
-                
-                <div class="mb-3">
-                    <label for="name" class="form-label">Name</label>
-                    <input type="text" name="name" id="name" class="form-control" value="<?php echo htmlspecialchars($name); ?>" required>
-                </div>
-
-                <div class="mb-3">
-                    <label for="description" class="form-label">Description</label>
-                    <textarea name="description" id="description" class="form-control" rows="3" required><?php echo htmlspecialchars($desc); ?></textarea>
-                </div>
-
-                <div class="mb-3">
-                    <label for="price" class="form-label">Price (PHP)</label>
-                    <input type="number" name="price" id="price" class="form-control" step="0.01" min="0" value="<?php echo htmlspecialchars((string)$price); ?>" required>
-                </div>
-
-                <div class="mb-3">
-                    <label for="image" class="form-label">Product Image (Primary - Max 2MB, JPG/PNG/GIF)</label>
-                    <input type="file" name="image" id="image" class="form-control" accept="image/*">
-                </div>
-
-                <button type="submit" 
-                    class="btn btn-lg mt-3" 
-                    style="background-color: #198754 !important; border-color: #198754 !important; color: #ffffff !important;">
-                    <i class="fas fa-plus me-2" style="color: #ffffff !important;"></i> Save Product
-                </button>
-            </form>
+<div class="pf sx-container">
+    <nav class="pf-crumb" aria-label="Breadcrumb">
+        <a href="/sweepxpress/admin/products.php">Products</a> <span aria-hidden="true">/</span> <span>New product</span>
+    </nav>
+    <div class="pf-head">
+        <div>
+            <h1 class="sx-heading-lg">Add product</h1>
+            <p>New products start with 0 stock. Use Stock in to receive inventory.</p>
         </div>
     </div>
+
+    <?php if ($errors): ?>
+        <div class="sx-alert sx-alert-error" role="alert" style="margin-bottom: var(--sx-space-4)">
+            <i class="fa-solid fa-circle-exclamation"></i><div><?= implode('<br>', array_map('h', $errors)) ?></div>
+        </div>
+    <?php endif; ?>
+
+    <form method="post" enctype="multipart/form-data" class="pf-layout">
+        <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+        <section class="sx-card">
+            <h2 class="pf-title">Details</h2>
+            <?php sx_product_fields($values, $categories); ?>
+        </section>
+
+        <aside class="pf-side">
+            <section class="sx-card">
+                <h2 class="pf-title">Image</h2>
+                <label class="pf-drop" for="pf-image">
+                    <img id="pf-preview" alt="" hidden>
+                    <span id="pf-drop-text"><i class="fa-solid fa-image"></i> Choose an image<br><small>JPG, PNG, GIF or WebP · max 2 MB</small></span>
+                </label>
+                <input type="file" id="pf-image" name="image" accept="image/jpeg,image/png,image/gif,image/webp" class="pf-file">
+            </section>
+            <div class="pf-actions">
+                <a href="/sweepxpress/admin/products.php" class="sx-btn sx-btn-ghost">Cancel</a>
+                <button type="submit" class="sx-btn sx-btn-primary"><i class="fa-solid fa-plus"></i> Add product</button>
+            </div>
+        </aside>
+    </form>
 </div>
+
+<script>
+// Preview ng larawan bago i-upload
+document.getElementById('pf-image').addEventListener('change', function () {
+    const file = this.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { sxToast('Image must be 2 MB or smaller', 'error'); this.value = ''; return; }
+    const img = document.getElementById('pf-preview');
+    img.src = URL.createObjectURL(file);
+    img.hidden = false;
+    document.getElementById('pf-drop-text').hidden = true;
+});
+</script>
+
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>

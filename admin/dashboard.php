@@ -8,1070 +8,501 @@ if (!is_admin()) {
 }
 
 $currentAdmin = $_SESSION['user'] ?? [];
+$lowStock     = 10; // pareho sa admin/inventory.php at product card
 
-// --- DB QUERIES (unchanged) ---
+// Mga default para hindi mag-warning ang page kapag pumalya ang DB
+$kpi = array_fill_keys(['revenue', 'orders', 'open', 'aov', 'cancelRate', 'invValue', 'units', 'low', 'out'], 0);
+$attention = ['pending' => 0, 'po' => 0, 'cancel' => 0, 'delivered' => 0];
+$monthLabels = $monthRevenue = $flowLabels = $flowIn = $flowOut = [];
+$statusCounts = $topProducts = $lowStockList = $recentOrders = [];
+$segments = ['customer' => 0, 'business' => 0, 'new30' => 0];
+
 try {
-    $totalSales    = $pdo->query("SELECT IFNULL(SUM(total),0) AS sales FROM orders")->fetch()['sales'];
-    $totalOrders   = $pdo->query("SELECT COUNT(*) AS cnt FROM orders")->fetch()['cnt'];
-    $totalProducts = $pdo->query("SELECT COUNT(*) AS cnt FROM products")->fetch()['cnt'];
-    $totalUsers    = $pdo->query("SELECT COUNT(*) AS cnt FROM users")->fetch()['cnt'];
-
-    $totalCancelledOrders = $pdo->query("SELECT COUNT(*) AS cnt FROM orders WHERE status = 'cancelled'")->fetch()['cnt'];
-    $aov              = $totalOrders > 0 ? $totalSales / $totalOrders : 0;
-    $cancellationRate = $totalOrders > 0 ? ($totalCancelledOrders / $totalOrders) * 100 : 0;
-
-    $salesData = $pdo->query("
-        SELECT DATE_FORMAT(created_at, '%b %Y') AS month, IFNULL(SUM(total), 0) AS monthly_total
+    // ---- Sales: kita = delivered + completed lang (dati: kasama pati cancelled at pending)
+    $s = $pdo->query("
+        SELECT
+            COUNT(*) AS orders,
+            SUM(status NOT IN ('delivered','completed','cancelled')) AS open_orders,
+            SUM(status = 'cancelled') AS cancelled,
+            COALESCE(SUM(CASE WHEN status IN ('delivered','completed') THEN total END), 0) AS revenue,
+            COALESCE(AVG(CASE WHEN status <> 'cancelled' THEN total END), 0) AS aov
         FROM orders
-        WHERE created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
-        GROUP BY YEAR(created_at), MONTH(created_at)
-        ORDER BY created_at ASC
-    ")->fetchAll(PDO::FETCH_ASSOC);
-    $months = array_column($salesData, 'month');
-    $totals = array_column($salesData, 'monthly_total');
+    ")->fetch(PDO::FETCH_ASSOC);
+    $kpi['orders']     = (int)$s['orders'];
+    $kpi['open']       = (int)$s['open_orders'];
+    $kpi['revenue']    = (float)$s['revenue'];
+    $kpi['aov']        = (float)$s['aov'];
+    $kpi['cancelRate'] = $s['orders'] ? $s['cancelled'] / $s['orders'] * 100 : 0;
 
+    // ---- Inventory: galing sa inventory table (ito ang totoong stock; luma na ang products.stock)
+    $i = $pdo->query("
+        SELECT
+            COALESCE(SUM(q.qty * q.price), 0) AS value,
+            COALESCE(SUM(q.qty), 0) AS units,
+            SUM(q.qty > 0 AND q.qty <= {$lowStock}) AS low,
+            SUM(q.qty = 0) AS out_of_stock
+        FROM (
+            SELECT p.price, COALESCE(SUM(i.quantity), 0) AS qty
+            FROM products p
+            LEFT JOIN inventory i ON i.product_id = p.id
+            GROUP BY p.id, p.price
+        ) q
+    ")->fetch(PDO::FETCH_ASSOC);
+    $kpi['invValue'] = (float)$i['value'];
+    $kpi['units']    = (int)$i['units'];
+    $kpi['low']      = (int)$i['low'];
+    $kpi['out']      = (int)$i['out_of_stock'];
+
+    // ---- Kailangang aksyunan
+    $attention = $pdo->query("
+        SELECT
+            SUM(status = 'pending') AS pending,
+            SUM(status = 'Pending PO') AS po,
+            SUM(status = 'cancellation_requested') AS cancel,
+            SUM(status = 'delivered') AS delivered
+        FROM orders
+    ")->fetch(PDO::FETCH_ASSOC);
+
+    // ---- Revenue bawat buwan, huling 12 buwan (kasama ang buwang walang benta)
+    $rows = $pdo->query("
+        SELECT DATE_FORMAT(created_at, '%Y-%m') AS ym, SUM(total) AS revenue
+        FROM orders
+        WHERE status IN ('delivered','completed')
+          AND created_at >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 11 MONTH), '%Y-%m-01')
+        GROUP BY ym
+    ")->fetchAll(PDO::FETCH_KEY_PAIR);
+    for ($m = 11; $m >= 0; $m--) {
+        $ym = date('Y-m', strtotime("first day of -$m month"));
+        $monthLabels[]  = date('M y', strtotime($ym . '-01'));
+        $monthRevenue[] = round((float)($rows[$ym] ?? 0), 2);
+    }
+
+    // ---- Stock in vs out bawat linggo, huling 12 linggo (stock_movements)
+    $rows = $pdo->query("
+        SELECT YEARWEEK(created_at, 1) AS yw,
+               SUM(CASE WHEN movement_type = 'IN'  THEN quantity ELSE 0 END) AS qty_in,
+               SUM(CASE WHEN movement_type = 'OUT' THEN ABS(quantity) ELSE 0 END) AS qty_out
+        FROM stock_movements
+        WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 12 WEEK)
+        GROUP BY yw
+    ")->fetchAll(PDO::FETCH_UNIQUE);
+    for ($w = 11; $w >= 0; $w--) {
+        $ts = strtotime("monday this week -$w week");
+        $yw = date('oW', $ts);
+        $flowLabels[] = date('M j', $ts);
+        $flowIn[]     = (int)($rows[$yw]['qty_in'] ?? 0);
+        $flowOut[]    = (int)($rows[$yw]['qty_out'] ?? 0);
+    }
+
+    // ---- Orders bawat status
+    $statusCounts = $pdo->query("SELECT status, COUNT(*) FROM orders GROUP BY status")->fetchAll(PDO::FETCH_KEY_PAIR);
+
+    // ---- Top products (units, hindi kasama ang cancelled)
     $topProducts = $pdo->query("
-        SELECT p.name, SUM(o.quantity) AS qty
-        FROM order_items o
-        JOIN products p ON o.product_id = p.id
-        GROUP BY p.id
+        SELECT p.name, SUM(oi.quantity) AS qty
+        FROM order_items oi
+        JOIN orders o ON o.id = oi.order_id AND o.status <> 'cancelled'
+        JOIN products p ON p.id = oi.product_id
+        GROUP BY p.id, p.name
         ORDER BY qty DESC
         LIMIT 5
     ")->fetchAll(PDO::FETCH_ASSOC);
 
-    $topUsers = $pdo->query("
-        SELECT u.name, COUNT(o.id) AS orders
-        FROM users u
-        JOIN orders o ON o.user_id = u.id
-        GROUP BY u.id
-        ORDER BY orders DESC
-        LIMIT 3
+    // ---- Pinakamababang stock
+    $lowStockList = $pdo->query("
+        SELECT p.id, p.name, p.category, COALESCE(SUM(i.quantity), 0) AS qty
+        FROM products p
+        LEFT JOIN inventory i ON i.product_id = p.id
+        GROUP BY p.id, p.name, p.category
+        HAVING qty <= {$lowStock}
+        ORDER BY qty ASC, p.name
+        LIMIT 6
     ")->fetchAll(PDO::FETCH_ASSOC);
 
+    // ---- Pinakabagong orders
     $recentOrders = $pdo->query("
-        SELECT o.id, u.name, o.total, o.status, o.created_at
+        SELECT o.id, COALESCE(u.name, o.customer_name, 'Guest') AS name, o.total, o.status, o.order_type, o.created_at
         FROM orders o
         LEFT JOIN users u ON o.user_id = u.id
         ORDER BY o.created_at DESC
-        LIMIT 5
+        LIMIT 6
     ")->fetchAll(PDO::FETCH_ASSOC);
 
-    $deliveredOrders = $pdo->query("SELECT COUNT(*) AS cnt FROM orders WHERE status IN ('delivered','completed')")->fetch()['cnt'];
-    $pendingOrders   = $pdo->query("SELECT COUNT(*) AS cnt FROM orders WHERE status = 'pending'")->fetch()['cnt'];
-    $preparingOrders = $pdo->query("SELECT COUNT(*) AS cnt FROM orders WHERE status IN ('preparing','shipped')")->fetch()['cnt'];
-    $cancelledOrders = $pdo->query("SELECT COUNT(*) AS cnt FROM orders WHERE status = 'cancelled'")->fetch()['cnt'];
-
-    $adminCount    = $pdo->query("SELECT COUNT(*) AS cnt FROM users WHERE role = 'admin'")->fetch()['cnt'];
-    $customerCount = $pdo->query("SELECT COUNT(*) AS cnt FROM users WHERE role = 'customer'")->fetch()['cnt'];
-    $businessCount = $pdo->query("SELECT COUNT(*) AS cnt FROM users WHERE role = 'business'")->fetch()['cnt'];
-
-    $oneMonthAgo   = date('Y-m-d H:i:s', strtotime('-30 days'));
-    $newUsersCount = $pdo->prepare("SELECT COUNT(*) AS cnt FROM users WHERE created_at >= ?");
-    $newUsersCount->execute([$oneMonthAgo]);
-    $newUsers = $newUsersCount->fetch()['cnt'];
-
-    $lowStockProducts = $pdo->query("
-        SELECT name, stock
-        FROM products
-        WHERE stock < 10
-        ORDER BY stock ASC
-        LIMIT 5
-    ")->fetchAll(PDO::FETCH_ASSOC);
-
-    $salesPerWeekData = $pdo->query("
-        SELECT CONCAT('W', WEEK(created_at, 1)) AS week_label, SUM(total) AS weekly_total
-        FROM orders
-        WHERE created_at >= DATE_SUB(NOW(), INTERVAL 8 WEEK)
-        GROUP BY YEAR(created_at), WEEK(created_at, 1)
-        ORDER BY created_at ASC
-    ")->fetchAll(PDO::FETCH_ASSOC);
-    $weekLabels = array_column($salesPerWeekData, 'week_label');
-    $weekTotals = array_column($salesPerWeekData, 'weekly_total');
-
-    $lostSalesData = $pdo->query("
-        SELECT DATE_FORMAT(created_at, '%b %Y') AS month, IFNULL(SUM(total), 0) AS lost_total
-        FROM orders
-        WHERE status = 'cancelled'
-          AND created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
-        GROUP BY YEAR(created_at), MONTH(created_at)
-        ORDER BY created_at ASC
-    ")->fetchAll(PDO::FETCH_ASSOC);
-    $lostSalesLabels = array_column($lostSalesData, 'month');
-    $lostSalesTotals = array_column($lostSalesData, 'lost_total');
+    // ---- Customers
+    $segments = $pdo->query("
+        SELECT SUM(role = 'customer') AS customer,
+               SUM(role = 'business') AS business,
+               SUM(created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) AS new30
+        FROM users
+    ")->fetch(PDO::FETCH_ASSOC);
 
 } catch (PDOException $e) {
     error_log("Dashboard DB Error: " . $e->getMessage());
+    $dbError = true;
 }
+
+// Status → [label, pill] (kapareho ng customer pages)
+$statusMeta = [
+    'pending'                => ['Pending', 'pending'],
+    'Pending PO'             => ['PO review', 'pending'],
+    'preparing'              => ['Preparing', 'preparing'],
+    'shipped'                => ['Shipped', 'shipped'],
+    'delivered'              => ['Delivered', 'delivered'],
+    'completed'              => ['Completed', 'completed'],
+    'cancellation_requested' => ['Cancel req.', 'cancelled'],
+    'cancelled'              => ['Cancelled', 'cancelled'],
+];
+// Pagkakasunod sa doughnut chart + kulay mula sa status tokens
+$funnel = [
+    'Pending'   => ['pending', 'Pending PO'],
+    'Preparing' => ['preparing', 'shipped'],
+    'Delivered' => ['delivered'],
+    'Completed' => ['completed'],
+    'Cancelled' => ['cancellation_requested', 'cancelled'],
+];
+$funnelData = [];
+foreach ($funnel as $label => $keys) {
+    $funnelData[$label] = array_sum(array_map(fn($k) => (int)($statusCounts[$k] ?? 0), $keys));
+}
+
+$hour = (int)date('G');
+$greeting = $hour < 12 ? 'Good morning' : ($hour < 18 ? 'Good afternoon' : 'Good evening');
+$firstName = explode(' ', trim($currentAdmin['name'] ?? 'Admin'))[0];
+$peso = fn($n, $d = 0) => '₱' . number_format((float)$n, $d);
 
 require_once __DIR__ . '/../includes/header.php';
 ?>
 
-
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+/* ============================================================
+   ADMIN DASHBOARD (Phase 9e) — tokens + sx-card / sx-pill / sx-table mula sa assets/style.css
+   ============================================================ */
+.db { max-width: 1440px; padding-block: var(--sx-space-5) var(--sx-space-8); }
+.db-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--sx-space-4); margin-bottom: var(--sx-space-5); }
+.db-head p { margin: var(--sx-space-2) 0 0; color: var(--sx-muted); }
+.db-actions { display: flex; flex-wrap: wrap; gap: var(--sx-space-2); }
 
-:root {
-    --bg-page: #edf1f7;
-    --bg-shell: #f6f8fc;
-    --bg-card: #ffffff;
-    --bg-soft: #f1f5f9;
+.db-section-label { margin: var(--sx-space-5) 0 var(--sx-space-3); font-size: var(--sx-text-xs); font-weight: var(--sx-weight-bold); letter-spacing: 0.08em; text-transform: uppercase; color: var(--sx-muted); }
+.db-section-label:first-of-type { margin-top: 0; }
 
-    --border-soft: #d4dbe8;
-    --text-main: #111827;
-    --text-soft: #6b7280;
-    --text-faint: #9ca3af;
+/* KPI tiles */
+.db-kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sx-space-3); }
+.db-kpi { display: flex; flex-direction: column; gap: 6px; padding: var(--sx-space-4); }
+.db-kpi-top { display: flex; align-items: center; justify-content: space-between; gap: var(--sx-space-2); }
+.db-kpi-label { font-size: var(--sx-text-xs); font-weight: var(--sx-weight-semibold); color: var(--sx-muted); }
+.db-kpi-icon { display: grid; place-items: center; width: 34px; height: 34px; border-radius: var(--sx-radius-md); background: var(--sx-primary-soft); color: var(--sx-primary); font-size: 0.9rem; }
+.db-kpi-icon.accent { background: var(--sx-accent-soft); color: var(--sx-accent-dark); }
+.db-kpi-icon.warn { background: var(--sx-status-pending-bg); color: var(--sx-status-pending); }
+.db-kpi-icon.danger { background: var(--sx-status-cancelled-bg); color: var(--sx-status-cancelled); }
+.db-kpi-value { font-size: clamp(1.25rem, 1rem + 1vw, 1.7rem); font-weight: var(--sx-weight-extrabold); letter-spacing: -0.02em; color: var(--sx-dark); line-height: 1.1; }
+.db-kpi-meta { font-size: var(--sx-text-xs); color: var(--sx-muted); }
+a.db-kpi { color: inherit; text-decoration: none; transition: transform var(--sx-transition), box-shadow var(--sx-transition); }
+a.db-kpi:hover { transform: translateY(-2px); box-shadow: var(--sx-shadow-md); }
 
-    --blue-main: #2563eb;
-    --blue-soft: #93c5fd;
-    --teal-main: #0f766e;
-    --teal-soft: #5eead4;
-    --amber-main: #f59e0b;
-    --red-main: #e11d48;
-    --purple-main: #7c3aed;
-
-    --radius-md: 14px;
-    --radius-lg: 18px;
-
-    --shadow-soft: 0 10px 30px rgba(15,23,42,0.08);
-    --shadow-strong: 0 16px 48px rgba(15,23,42,0.12);
+/* Needs attention */
+.db-attn { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sx-space-2); }
+.db-attn a {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sx-space-2);
+    padding: var(--sx-space-3) var(--sx-space-4);
+    border: 1px solid var(--sx-border-light);
+    border-radius: var(--sx-radius-md);
+    background: var(--sx-surface);
+    color: var(--sx-dark);
+    font-size: var(--sx-text-sm);
+    font-weight: var(--sx-weight-semibold);
+    text-decoration: none;
 }
+.db-attn a:hover { border-color: var(--sx-primary); }
+.db-attn strong { font-size: var(--sx-text-lg); font-weight: var(--sx-weight-extrabold); }
+.db-attn a.hot strong { color: var(--sx-status-pending); }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+/* Panels */
+.db-grid { display: grid; gap: var(--sx-space-4); margin-top: var(--sx-space-4); }
+.db-panel { display: flex; flex-direction: column; min-width: 0; }
+.db-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sx-space-3); margin-bottom: var(--sx-space-4); }
+.db-panel-head h2 { margin: 0; font-size: var(--sx-text-base); font-weight: var(--sx-weight-extrabold); color: var(--sx-dark); }
+.db-panel-head p { margin: 2px 0 0; font-size: var(--sx-text-xs); color: var(--sx-muted); }
+.db-panel-head a { flex-shrink: 0; font-size: var(--sx-text-sm); font-weight: var(--sx-weight-semibold); color: var(--sx-primary); text-decoration: none; }
+.db-chart { position: relative; height: 260px; }
+.db-chart.sm { height: 220px; }
 
-body {
-    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: radial-gradient(circle at top,#e0f2fe 0,#edf1f7 45%,#f9fafb 100%);
-    color: var(--text-main);
-}
+/* Lists */
+.db-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.db-list li { display: flex; align-items: center; justify-content: space-between; gap: var(--sx-space-3); padding: 10px 0; border-bottom: 1px solid var(--sx-border-light); font-size: var(--sx-text-sm); }
+.db-list li:last-child { border-bottom: none; }
+.db-list .name { min-width: 0; overflow: hidden; color: var(--sx-dark); font-weight: var(--sx-weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
+.db-list small { display: block; font-weight: var(--sx-weight-medium); color: var(--sx-muted); }
+.db-qty { flex-shrink: 0; padding: 2px 10px; border-radius: var(--sx-radius-pill); font-size: var(--sx-text-xs); font-weight: var(--sx-weight-bold); }
+.db-qty.out { background: var(--sx-status-cancelled-bg); color: var(--sx-status-cancelled); }
+.db-qty.low { background: var(--sx-status-pending-bg); color: var(--sx-status-pending); }
+.db-ok { display: grid; place-items: center; gap: var(--sx-space-2); padding: var(--sx-space-6) 0; color: var(--sx-accent-dark); text-align: center; }
+.db-ok i { font-size: 1.6rem; }
 
-/* SHELL */
-.dash-shell {
-    max-width: 1520px;
-    margin: 0 auto;
-    padding: 28px 16px 40px;
-}
+.db-table td a { color: var(--sx-dark); font-weight: var(--sx-weight-bold); text-decoration: none; }
+.db-table td a:hover { color: var(--sx-primary); }
+.db-table .num { text-align: right; white-space: nowrap; }
+.db-tag { margin-left: 6px; padding: 1px 6px; border-radius: var(--sx-radius-pill); background: var(--sx-primary-soft); color: var(--sx-primary); font-size: 10px; font-weight: var(--sx-weight-bold); }
 
 @media (min-width: 768px) {
-    .dash-shell { padding: 28px 28px 40px; }
+    .db-kpis { grid-template-columns: repeat(4, 1fr); }
+    .db-attn { grid-template-columns: repeat(4, 1fr); }
+    .db-grid.two { grid-template-columns: 1fr 1fr; }
 }
-
-/* HEADER BAR */
-/* HEADER BAR – COMPACT STRIP */
-.hero-bar {
-    display: grid;
-    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-    gap: 16px;
-    padding: 12px 14px;
-    border-radius: 16px;
-    background: linear-gradient(135deg, #f9fafb 0%, #eef2ff 50%, #e0f2fe 100%);
-    border: 1px solid rgba(148,163,184,0.35);
-    box-shadow: 0 14px 32px rgba(15,23,42,0.16);
-}
-
-.hero-main {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.hero-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 10px;
-    border-radius: 999px;
-    font-size: 0.68rem;
-    text-transform: uppercase;
-    letter-spacing: 0.16em;
-    background: rgba(15,23,42,0.06);
-    color: #1d4ed8;
-}
-
-.hero-title {
-    font-size: 1.2rem;
-    font-weight: 800;
-    letter-spacing: -0.03em;
-    color: #0f172a;
-}
-
-.hero-sub {
-    font-size: 0.82rem;
-    color: #64748b;
-}
-
-.hero-meta {
-    justify-self: end;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 8px;
-}
-
-.hero-meta-top {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 10px;
-    border-radius: 999px;
-    border: 1px solid rgba(148,163,184,0.45);
-    background: rgba(255,255,255,0.9);
-    font-size: 0.75rem;
-    color: #475569;
-}
-
-.hero-time-label {
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    color: #94a3b8;
-    font-weight: 600;
-}
-
-.hero-time-value {
-    font-size: 1.3rem;
-    font-weight: 800;
-    font-variant-numeric: tabular-nums;
-    color: #0f172a;
-}
-
-.hero-time-date {
-    font-size: 0.78rem;
-    color: #64748b;
-}
-
-@media (max-width: 900px) {
-    .hero-bar {
-        grid-template-columns: 1fr;
-        border-radius: 14px;
-        padding: 12px 12px;
-    }
-    .hero-meta {
-        align-items: flex-start;
-        justify-self: start;
-    }
-}
-
-/* SECTION HEAD */
-/* Section header spacing */
-.section-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    margin-top: 22px;
-    margin-bottom: 12px;
-}
-
-.section-title {
-    font-size: 1rem;
-    font-weight: 700;
-    color: var(--text-main);
-    margin-bottom: 2px;
-}
-
-.section-sub {
-    font-size: 0.78rem;
-    color: var(--text-soft);
-}
-
-/* KPI STRIP */
-.kpi-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit,minmax(180px,1fr));
-    gap: 12px;
-    margin-bottom: 24px;
-}
-
-.kpi-card {
-    position: relative;
-    overflow: hidden;
-    border-radius: var(--radius-md);
-    background: linear-gradient(135deg,#ffffff,#f3f6fb);
-    border: 1px solid rgba(148,163,184,0.25);
-    box-shadow: var(--shadow-soft);
-    padding: 12px 12px 10px;
-}
-
-.kpi-inner {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 8px;
-}
-
-.kpi-label {
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.16em;
-    color: var(--text-faint);
-    font-weight: 600;
-    margin-bottom: 4px;
-}
-
-.kpi-value {
-    font-size: 1.35rem;
-    font-weight: 800;
-    letter-spacing: -0.03em;
-}
-
-.kpi-foot {
-    margin-top: 4px;
-    font-size: 0.75rem;
-    color: var(--text-soft);
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 8px;
-    border-radius: 999px;
-    background: var(--bg-soft);
-}
-
-.kpi-icon {
-    width: 30px;
-    height: 30px;
-    border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-size: 1rem;
-}
-
-/* COLOR VARIANTS */
-.kpi-teal   .kpi-value { color: var(--teal-main); }
-.kpi-teal   .kpi-icon  { background: var(--teal-main); }
-
-.kpi-blue   .kpi-value { color: var(--blue-main); }
-.kpi-blue   .kpi-icon  { background: var(--blue-main); }
-
-.kpi-purple .kpi-value { color: var(--purple-main); }
-.kpi-purple .kpi-icon  { background: var(--purple-main); }
-
-.kpi-amber  .kpi-value { color: var(--amber-main); }
-.kpi-amber  .kpi-icon  { background: var(--amber-main); }
-
-.kpi-red    .kpi-value { color: var(--red-main); }
-.kpi-red    .kpi-icon  { background: var(--red-main); }
-
-.kpi-slate  .kpi-value { color: var(--text-main); }
-.kpi-slate  .kpi-icon  { background: #6b7280; }
-
-/* GRID LAYOUTS */
-.row-flex {
-    display: grid;
-    grid-template-columns: minmax(0,2fr) minmax(0,1.1fr);
-    gap: 16px;
-    margin-bottom: 20px;
-}
-
-.row-flex-3 {
-    display: grid;
-    grid-template-columns: repeat(3,minmax(0,1fr));
-    gap: 16px;
-    margin-bottom: 20px;
-}
-
-.bottom-grid {
-    display: grid;
-    grid-template-columns: minmax(0,1.3fr) minmax(0,1.7fr);
-    gap: 16px;
-}
-
-/* Stack for mobile */
-@media (max-width: 1100px) {
-    .row-flex,
-    .bottom-grid {
-        grid-template-columns: 1fr;
-    }
-}
-
-@media (max-width: 900px) {
-    .row-flex-3 {
-        grid-template-columns: repeat(2,minmax(0,1fr));
-    }
-}
-
-@media (max-width: 640px) {
-    .row-flex,
-    .row-flex-3,
-    .bottom-grid {
-        grid-template-columns: 1fr;
-        gap: 12px;
-    }
-}
-
-/* PANELS & TABLES */
-.panel {
-    background: var(--bg-card);
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border-soft);
-    box-shadow: var(--shadow-soft);
-    padding: 14px 14px 12px;
-}
-
-.panel-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 8px;
-}
-
-.panel-title {
-    font-size: 0.95rem;
-    font-weight: 700;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.panel-sub {
-    font-size: 0.78rem;
-    color: var(--text-soft);
-}
-
-.chip-soft {
-    padding: 3px 8px;
-    border-radius: 999px;
-    font-size: 0.73rem;
-    background: var(--bg-soft);
-    color: var(--text-soft);
-}
-
-/* Charts */
-canvas {
-    max-height: 260px;
-}
-
-@media (max-width: 640px) {
-    canvas { max-height: 220px; }
-}
-
-/* TABLE */
-.table-wrap {
-    overflow-x: auto;
-    margin-top: 4px;
-}
-
-.table-recent {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.86rem;
-}
-
-.table-recent thead th {
-    text-align: left;
-    padding: 8px 8px;
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    color: var(--text-faint);
-    border-bottom: 1px solid var(--border-soft);
-    white-space: nowrap;
-}
-
-.table-recent tbody td {
-    padding: 8px 8px;
-    border-bottom: 1px solid rgba(148,163,184,0.25);
-}
-
-.table-recent tbody tr:hover {
-    background: #eef2ff;
-}
-
-.badge-id {
-    display: inline-flex;
-    padding: 3px 8px;
-    border-radius: 999px;
-    background: var(--bg-soft);
-    font-size: 0.78rem;
-    font-weight: 600;
-    color: var(--blue-main);
-}
-
-.status-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 9px;
-    border-radius: 999px;
-    font-size: 0.78rem;
-    font-weight: 600;
-}
-
-.status-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 999px;
-}
-
-.st-delivered { background:#dcfce7;color:#166534; }
-.st-delivered .status-dot { background:#16a34a; }
-
-.st-pending { background:#fef9c3;color:#92400e; }
-.st-pending .status-dot { background:#eab308; }
-
-.st-preparing { background:#e0f2fe;color:#075985; }
-.st-preparing .status-dot { background:#0ea5e9; }
-
-.st-cancelled { background:#fee2e2;color:#b91c1c; }
-.st-cancelled .status-dot { background:#ef4444; }
-
-/* LIST CARDS */
-.list-card {
-    background: var(--bg-card);
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border-soft);
-    box-shadow: var(--shadow-soft);
-    padding: 14px 14px 12px;
-}
-
-.list-head {
-    font-size: 0.9rem;
-    font-weight: 700;
-    color: var(--text-main);
-    margin-bottom: 8px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.list-group {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-}
-
-.list-group li {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 7px 0;
-    border-bottom: 1px dashed rgba(148,163,184,0.5);
-    font-size: 0.86rem;
-}
-
-.list-group li:last-child {
-    border-bottom: none;
-}
-
-.list-badge {
-    display: inline-flex;
-    padding: 3px 9px;
-    border-radius: 999px;
-    background: var(--bg-soft);
-    font-size: 0.78rem;
-    font-weight: 600;
-}
-
-/* Hide segmentation + low stock + recent orders on very small screens only */
-@media screen and (max-width: 640px) {
-    .bottom-grid > .row.g-3.h-100,
-    .bottom-grid > .panel {
-        display: none;
-    }
-}
-
-/* RESPONSIVE */
-@media (max-width: 768px) {
-    .panel,
-    .list-card {
-        padding: 14px 12px;
-    }
+@media (min-width: 1200px) {
+    .db-grid.main { grid-template-columns: 2fr 1fr; }
+    .db-grid.three { grid-template-columns: 1fr 1fr 1fr; }
+    .db-grid.bottom { grid-template-columns: 1fr 2fr; }
 }
 </style>
 
-<div class="dash-shell">
-    <div class="hero-bar">
-    <div class="hero-main">
-        <span class="hero-pill">
-            <i class="fa-solid fa-shield-halved"></i>
-            Admin control
-        </span>
-        <div class="hero-title">
-            Growth &amp; Operations Center
-        </div>
-        <p class="hero-sub">
-            Welcome back, <strong><?php echo htmlspecialchars($currentAdmin['name'] ?? 'Admin'); ?></strong>. Monitor sales, users, and risk in one focused view.
-        </p>
-        
-    </div>
-    <div class="hero-meta">
-        <div class="hero-meta-top">
-            <i class="fa-regular fa-id-badge"></i>
-            Admin since <?php echo isset($currentAdmin['created_at']) ? htmlspecialchars(date('M Y', strtotime($currentAdmin['created_at']))) : '—'; ?>
-        </div>
-        <div style="text-align:right;">
-            <div class="hero-time-label">Live snapshot</div>
-            <div class="hero-time-value" id="current-time">--:--</div>
-            <div class="hero-time-date" id="current-date">Loading…</div>
-        </div>
-    </div>
-</div>
-
-    <div class="section-head">
+<div class="db sx-container">
+    <div class="db-head">
         <div>
-            <div class="section-title">Financial overview</div>
-            <div class="section-sub">Revenue performance and transaction volume.</div>
+            <span class="sx-eyebrow"><?= date('l, F j') ?></span>
+            <h1 class="sx-heading-lg"><?= $greeting ?>, <?= h($firstName) ?></h1>
+            <p>Here's how sales and stock are moving.</p>
         </div>
-    </div>
-    <div class="kpi-row">
-        <div class="kpi-card kpi-teal">
-            <div class="kpi-inner">
-                <div>
-                    <div class="kpi-label">Total revenue</div>
-                    <div class="kpi-value">₱<?php echo number_format($totalSales, 2); ?></div>
-                    <div class="kpi-foot">
-                        <i class="fa-solid fa-infinity"></i> All-time sales
-                    </div>
-                </div>
-                <div class="kpi-icon">
-                    <i class="fa-solid fa-peso-sign"></i>
-                </div>
-            </div>
-        </div>
-        <div class="kpi-card kpi-blue">
-            <div class="kpi-inner">
-                <div>
-                    <div class="kpi-label">Avg order value</div>
-                    <div class="kpi-value">₱<?php echo number_format($aov, 2); ?></div>
-                    <div class="kpi-foot">
-                        <i class="fa-solid fa-bullhorn"></i> Marketing efficiency
-                    </div>
-                </div>
-                <div class="kpi-icon">
-                    <i class="fa-solid fa-coins"></i>
-                </div>
-            </div>
-        </div>
-        <div class="kpi-card kpi-purple">
-            <div class="kpi-inner">
-                <div>
-                    <div class="kpi-label">Total orders</div>
-                    <div class="kpi-value"><?php echo number_format($totalOrders); ?></div>
-                    <div class="kpi-foot">
-                        <i class="fa-solid fa-gauge-high"></i> Operational volume
-                    </div>
-                </div>
-                <div class="kpi-icon">
-                    <i class="fa-solid fa-cart-shopping"></i>
-                </div>
-            </div>
-        </div>
-        <div class="kpi-card kpi-amber">
-            <div class="kpi-inner">
-                <div>
-                    <div class="kpi-label">Active SKUs</div>
-                    <div class="kpi-value"><?php echo $totalProducts; ?></div>
-                    <div class="kpi-foot">
-                        <i class="fa-solid fa-layer-group"></i> Product catalog
-                    </div>
-                </div>
-                <div class="kpi-icon">
-                    <i class="fa-solid fa-box-open"></i>
-                </div>
-            </div>
+        <div class="db-actions">
+            <a href="/sweepxpress/admin/stock_in.php" class="sx-btn sx-btn-outline sx-btn-sm"><i class="fa-solid fa-truck-ramp-box"></i> Stock in</a>
+            <a href="/sweepxpress/admin/add_product.php" class="sx-btn sx-btn-outline sx-btn-sm"><i class="fa-solid fa-plus"></i> Add product</a>
+            <a href="/sweepxpress/admin/allorders.php" class="sx-btn sx-btn-primary sx-btn-sm"><i class="fa-solid fa-bag-shopping"></i> View orders</a>
         </div>
     </div>
 
-    <div class="section-head">
-        <div>
-            <div class="section-title">Customers &amp; risk</div>
-            <div class="section-sub">Acquisition, base size and cancellation signals.</div>
+    <?php if (!empty($dbError)): ?>
+        <div class="sx-alert sx-alert-error" role="alert" style="margin-bottom: var(--sx-space-4)">
+            <i class="fa-solid fa-circle-exclamation"></i><div>Some figures couldn't be loaded. Check the error log.</div>
         </div>
+    <?php endif; ?>
+
+    <!-- Needs attention -->
+    <div class="db-section-label">Needs attention</div>
+    <div class="db-attn">
+        <a href="/sweepxpress/admin/allorders.php" class="<?= $attention['pending'] ? 'hot' : '' ?>"><span>Pending orders</span><strong><?= (int)$attention['pending'] ?></strong></a>
+        <a href="/sweepxpress/admin/allorders.php" class="<?= $attention['po'] ? 'hot' : '' ?>"><span>POs to review</span><strong><?= (int)$attention['po'] ?></strong></a>
+        <a href="/sweepxpress/admin/allorders.php" class="<?= $attention['cancel'] ? 'hot' : '' ?>"><span>Cancel requests</span><strong><?= (int)$attention['cancel'] ?></strong></a>
+        <a href="/sweepxpress/admin/inventory.php?filter=low" class="<?= $kpi['low'] + $kpi['out'] ? 'hot' : '' ?>"><span>Items to restock</span><strong><?= $kpi['low'] + $kpi['out'] ?></strong></a>
     </div>
-    <div class="kpi-row">
-        <div class="kpi-card kpi-red">
-            <div class="kpi-inner">
-                <div>
-                    <div class="kpi-label">Cancellation rate</div>
-                    <div class="kpi-value"><?php echo number_format($cancellationRate, 2); ?>%</div>
-                    <div class="kpi-foot">
-                        <i class="fa-solid fa-fire"></i> Risk indicator
-                    </div>
-                </div>
-                <div class="kpi-icon">
-                    <i class="fa-solid fa-circle-xmark"></i>
-                </div>
-            </div>
+
+    <!-- Sales KPIs -->
+    <div class="db-section-label">Sales</div>
+    <div class="db-kpis">
+        <div class="sx-card db-kpi">
+            <div class="db-kpi-top"><span class="db-kpi-label">Revenue</span><span class="db-kpi-icon accent"><i class="fa-solid fa-peso-sign"></i></span></div>
+            <div class="db-kpi-value"><?= $peso($kpi['revenue']) ?></div>
+            <div class="db-kpi-meta">Delivered &amp; completed orders</div>
         </div>
-        <div class="kpi-card kpi-teal">
-            <div class="kpi-inner">
-                <div>
-                    <div class="kpi-label">New users (30d)</div>
-                    <div class="kpi-value"><?php echo number_format($newUsers); ?></div>
-                    <div class="kpi-foot">
-                        <i class="fa-solid fa-rocket"></i> Acquisition velocity
-                    </div>
-                </div>
-                <div class="kpi-icon">
-                    <i class="fa-solid fa-user-plus"></i>
-                </div>
-            </div>
+        <a href="/sweepxpress/admin/allorders.php" class="sx-card db-kpi">
+            <div class="db-kpi-top"><span class="db-kpi-label">Orders</span><span class="db-kpi-icon"><i class="fa-solid fa-bag-shopping"></i></span></div>
+            <div class="db-kpi-value"><?= number_format($kpi['orders']) ?></div>
+            <div class="db-kpi-meta"><?= number_format($kpi['open']) ?> still open</div>
+        </a>
+        <div class="sx-card db-kpi">
+            <div class="db-kpi-top"><span class="db-kpi-label">Avg order value</span><span class="db-kpi-icon"><i class="fa-solid fa-receipt"></i></span></div>
+            <div class="db-kpi-value"><?= $peso($kpi['aov'], 2) ?></div>
+            <div class="db-kpi-meta">Excludes cancelled</div>
         </div>
-        <div class="kpi-card kpi-slate">
-            <div class="kpi-inner">
-                <div>
-                    <div class="kpi-label">Total users</div>
-                    <div class="kpi-value"><?php echo number_format($totalUsers); ?></div>
-                    <div class="kpi-foot">
-                        <i class="fa-solid fa-earth-asia"></i> Market reach
-                    </div>
-                </div>
-                <div class="kpi-icon">
-                    <i class="fa-solid fa-users"></i>
-                </div>
-            </div>
-        </div>
-        <div class="kpi-card kpi-red">
-            <div class="kpi-inner">
-                <div>
-                    <div class="kpi-label">Low stock items</div>
-                    <div class="kpi-value"><?php echo count($lowStockProducts); ?></div>
-                    <div class="kpi-foot">
-                        <i class="fa-solid fa-triangle-exclamation"></i> Supply risk
-                    </div>
-                </div>
-                <div class="kpi-icon">
-                    <i class="fa-solid fa-boxes-stacked"></i>
-                </div>
-            </div>
+        <div class="sx-card db-kpi">
+            <div class="db-kpi-top"><span class="db-kpi-label">Cancellation rate</span><span class="db-kpi-icon danger"><i class="fa-solid fa-ban"></i></span></div>
+            <div class="db-kpi-value"><?= number_format($kpi['cancelRate'], 1) ?>%</div>
+            <div class="db-kpi-meta">Of all orders</div>
         </div>
     </div>
 
-    <div class="row-flex">
-        <div class="panel">
-            <div class="panel-header">
-                <div>
-                    <div class="panel-title" style="color:var(--blue-main);">
-                        <i class="fa-solid fa-chart-area"></i> Monthly revenue
-                    </div>
-                    <div class="panel-sub">Trailing 6‑month view of realized revenue.</div>
-                </div>
-                <span class="chip-soft">
-                    <i class="fa-regular fa-calendar"></i> Last 6 months
-                </span>
-            </div>
-            <canvas id="salesChart"></canvas>
+    <!-- Inventory KPIs -->
+    <div class="db-section-label">Inventory</div>
+    <div class="db-kpis">
+        <div class="sx-card db-kpi">
+            <div class="db-kpi-top"><span class="db-kpi-label">Stock value</span><span class="db-kpi-icon accent"><i class="fa-solid fa-warehouse"></i></span></div>
+            <div class="db-kpi-value"><?= $peso($kpi['invValue']) ?></div>
+            <div class="db-kpi-meta">At selling price</div>
         </div>
-        <div class="panel">
-            <div class="panel-header">
-                <div>
-                    <div class="panel-title" style="color:var(--red-main);">
-                        <i class="fa-solid fa-circle-minus"></i> Lost sales
-                    </div>
-                    <div class="panel-sub">Cancelled order value by month.</div>
-                </div>
-            </div>
-            <canvas id="lostSalesChart"></canvas>
-        </div>
+        <a href="/sweepxpress/admin/inventory.php" class="sx-card db-kpi">
+            <div class="db-kpi-top"><span class="db-kpi-label">Units on hand</span><span class="db-kpi-icon"><i class="fa-solid fa-boxes-stacked"></i></span></div>
+            <div class="db-kpi-value"><?= number_format($kpi['units']) ?></div>
+            <div class="db-kpi-meta">Across all locations</div>
+        </a>
+        <a href="/sweepxpress/admin/inventory.php?filter=low" class="sx-card db-kpi">
+            <div class="db-kpi-top"><span class="db-kpi-label">Low stock</span><span class="db-kpi-icon warn"><i class="fa-solid fa-triangle-exclamation"></i></span></div>
+            <div class="db-kpi-value"><?= number_format($kpi['low']) ?></div>
+            <div class="db-kpi-meta"><?= $lowStock ?> units or fewer</div>
+        </a>
+        <a href="/sweepxpress/admin/inventory.php?filter=out" class="sx-card db-kpi">
+            <div class="db-kpi-top"><span class="db-kpi-label">Out of stock</span><span class="db-kpi-icon danger"><i class="fa-solid fa-circle-xmark"></i></span></div>
+            <div class="db-kpi-value"><?= number_format($kpi['out']) ?></div>
+            <div class="db-kpi-meta">Can't be ordered</div>
+        </a>
     </div>
 
-    <div class="row-flex-3">
-        <div class="panel">
-            <div class="panel-header">
-                <div>
-                    <div class="panel-title">
-                        <i class="fa-solid fa-calendar-week" style="color:var(--blue-main);"></i> Weekly performance
-                    </div>
-                    <div class="panel-sub">8‑week sales velocity.</div>
-                </div>
+    <!-- Charts -->
+    <div class="db-grid main">
+        <section class="sx-card db-panel">
+            <div class="db-panel-head">
+                <div><h2>Revenue</h2><p>Delivered &amp; completed orders, last 12 months</p></div>
             </div>
-            <canvas id="salesPerWeekChart"></canvas>
-        </div>
-        <div class="panel">
-            <div class="panel-header">
-                <div>
-                    <div class="panel-title">
-                        <i class="fa-solid fa-trophy" style="color:var(--teal-main);"></i> Top 5 products
-                    </div>
-                    <div class="panel-sub">Units sold by leading SKUs.</div>
-                </div>
+            <div class="db-chart"><canvas id="revenueChart" aria-label="Monthly revenue chart" role="img"></canvas></div>
+        </section>
+        <section class="sx-card db-panel">
+            <div class="db-panel-head">
+                <div><h2>Orders by status</h2><p>All time</p></div>
             </div>
-            <canvas id="topProductsChart"></canvas>
-        </div>
-        <div class="panel">
-            <div class="panel-header">
-                <div>
-                    <div class="panel-title">
-                        <i class="fa-solid fa-filter" style="color:var(--amber-main);"></i> Orders funnel
-                    </div>
-                    <div class="panel-sub">Current order lifecycle distribution.</div>
-                </div>
-            </div>
-            <canvas id="ordersChart"></canvas>
-        </div>
+            <div class="db-chart"><canvas id="statusChart" aria-label="Orders by status chart" role="img"></canvas></div>
+        </section>
     </div>
 
-    <div class="bottom-grid">
-        <div class="row g-3 h-100">
-            <div class="col-12">
-                <div class="list-card">
-                    <div class="list-head">
-                        <i class="fa-solid fa-user-group"></i> Customer segmentation
-                    </div>
-                    <ul class="list-group">
-                        <li>
-                            <span>Customer accounts</span>
-                            <span class="list-badge"><?php echo $customerCount; ?></span>
-                        </li>
-                        <li>
-                            <span>Business accounts</span>
-                            <span class="list-badge"><?php echo $businessCount; ?></span>
-                        </li>
-                        <li>
-                            <span>Top buyers tracked</span>
-                            <span class="list-badge"><?php echo count($topUsers); ?></span>
-                        </li>
-                    </ul>
-                    <p style="font-size:0.86rem;color:var(--text-soft);margin-top:12px;padding-top:10px;border-top:1px solid var(--border-soft);">
-                        <strong style="color:var(--blue-main);"><?php echo $newUsers; ?></strong> new users joined in the last 30 days.
-                    </p>
-                </div>
+    <div class="db-grid two">
+        <section class="sx-card db-panel">
+            <div class="db-panel-head">
+                <div><h2>Stock in vs out</h2><p>Units moved per week, last 12 weeks</p></div>
+                <a href="/sweepxpress/admin/inventory.php">Inventory →</a>
             </div>
-            <div class="col-12">
-                <div class="list-card">
-                    <div class="list-head">
-                        <i class="fa-solid fa-triangle-exclamation"></i> Low stock inventory
-                    </div>
-                    <ul class="list-group">
-                        <?php if (count($lowStockProducts) > 0): ?>
-                            <?php foreach ($lowStockProducts as $product): ?>
-                                <li>
-                                    <span><?php echo htmlspecialchars($product['name']); ?></span>
-                                    <span class="list-badge" style="background:rgba(248,113,113,0.12);color:var(--red-main);">
-                                        <?php echo $product['stock']; ?> left
-                                    </span>
-                                </li>
-                            <?php endforeach; ?>
-                        <?php else: ?>
-                            <li style="justify-content:center;color:var(--teal-main);">
-                                All inventory is healthy!
+            <div class="db-chart sm"><canvas id="flowChart" aria-label="Stock in versus out chart" role="img"></canvas></div>
+        </section>
+        <section class="sx-card db-panel">
+            <div class="db-panel-head">
+                <div><h2>Top products</h2><p>Units sold, excluding cancelled orders</p></div>
+                <a href="/sweepxpress/admin/products.php">Products →</a>
+            </div>
+            <div class="db-chart sm"><canvas id="topChart" aria-label="Top products chart" role="img"></canvas></div>
+        </section>
+    </div>
+
+    <div class="db-grid bottom">
+        <div class="db-panel" style="gap: var(--sx-space-4)">
+            <section class="sx-card db-panel">
+                <div class="db-panel-head">
+                    <div><h2>Restock soon</h2><p>Lowest stock first</p></div>
+                    <a href="/sweepxpress/admin/stock_in.php">Stock in →</a>
+                </div>
+                <?php if ($lowStockList): ?>
+                    <ul class="db-list">
+                        <?php foreach ($lowStockList as $p): ?>
+                            <li>
+                                <span class="name"><?= h($p['name']) ?><small><?= h($p['category'] ?: 'Uncategorized') ?></small></span>
+                                <span class="db-qty <?= (int)$p['qty'] === 0 ? 'out' : 'low' ?>"><?= (int)$p['qty'] === 0 ? 'Out' : (int)$p['qty'] . ' left' ?></span>
                             </li>
-                        <?php endif; ?>
+                        <?php endforeach; ?>
                     </ul>
-                </div>
-            </div>
+                <?php else: ?>
+                    <div class="db-ok"><i class="fa-solid fa-circle-check"></i> All products are well stocked.</div>
+                <?php endif; ?>
+            </section>
+            <section class="sx-card db-panel">
+                <div class="db-panel-head"><div><h2>Customers</h2><p>Registered accounts</p></div></div>
+                <ul class="db-list">
+                    <li><span class="name">Customer accounts</span><strong><?= (int)$segments['customer'] ?></strong></li>
+                    <li><span class="name">Business accounts</span><strong><?= (int)$segments['business'] ?></strong></li>
+                    <li><span class="name">New in the last 30 days</span><strong><?= (int)$segments['new30'] ?></strong></li>
+                </ul>
+            </section>
         </div>
-        <div class="panel">
-            <div class="panel-header">
-                <div>
-                    <div class="panel-title">
-                        <i class="fa-solid fa-clock-rotate-left"></i> Recent order activity
-                    </div>
-                    <div class="panel-sub">Most recent 5 transactions.</div>
-                </div>
+
+        <section class="sx-card db-panel">
+            <div class="db-panel-head">
+                <div><h2>Recent orders</h2><p>Latest 6</p></div>
+                <a href="/sweepxpress/admin/allorders.php">All orders →</a>
             </div>
-            <div class="table-wrap">
-                <table class="table-recent">
+            <div class="sx-table-wrap">
+                <table class="sx-table db-table">
                     <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Customer</th>
-                            <th>Total</th>
-                            <th>Status</th>
-                            <th>Date</th>
-                        </tr>
+                        <tr><th>Order</th><th>Customer</th><th class="num">Total</th><th>Status</th><th>Date</th></tr>
                     </thead>
                     <tbody>
-                    <?php foreach ($recentOrders as $ro): ?>
-                        <tr>
-                            <td><span class="badge-id">#<?php echo $ro['id']; ?></span></td>
-                            <td><?php echo htmlspecialchars($ro['name'] ?? 'N/A'); ?></td>
-                            <td style="font-weight:600;color:var(--teal-main);">
-                                ₱<?php echo number_format($ro['total'], 2); ?>
-                            </td>
-                            <td>
-                                <?php
-                                $cls = 'st-pending';
-                                $label = ucfirst($ro['status']);
-                                if (in_array($ro['status'], ['delivered','completed'])) {
-                                    $cls = 'st-delivered'; $label = 'Delivered';
-                                } elseif ($ro['status'] === 'pending') {
-                                    $cls = 'st-pending';   $label = 'Pending';
-                                } elseif (in_array($ro['status'], ['preparing','shipped'])) {
-                                    $cls = 'st-preparing'; $label = 'Preparing';
-                                } elseif ($ro['status'] === 'cancelled') {
-                                    $cls = 'st-cancelled'; $label = 'Cancelled';
-                                }
-                                ?>
-                                <span class="status-pill <?php echo $cls; ?>">
-                                    <span class="status-dot"></span>
-                                    <?php echo htmlspecialchars($label); ?>
-                                </span>
-                            </td>
-                            <td><?php echo date("M d, H:i", strtotime($ro['created_at'])); ?></td>
-                        </tr>
-                    <?php endforeach; ?>
+                        <?php foreach ($recentOrders as $ro):
+                            [$label, $pill] = $statusMeta[$ro['status']] ?? [ucfirst($ro['status']), 'pending'];
+                        ?>
+                            <tr>
+                                <td>
+                                    <a href="/sweepxpress/admin/order_details.php?id=<?= (int)$ro['id'] ?>">#<?= (int)$ro['id'] ?></a>
+                                    <?php if ($ro['order_type'] === 'B2B' || $ro['status'] === 'Pending PO'): ?><span class="db-tag">PO</span><?php endif; ?>
+                                </td>
+                                <td><?= h($ro['name']) ?></td>
+                                <td class="num"><?= $peso($ro['total'], 2) ?></td>
+                                <td><span class="sx-pill sx-pill-<?= $pill ?>"><?= h($label) ?></span></td>
+                                <td><?= date('M j, g:i A', strtotime($ro['created_at'])) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        <?php if (!$recentOrders): ?>
+                            <tr><td colspan="5" class="sx-empty">No orders yet.</td></tr>
+                        <?php endif; ?>
                     </tbody>
                 </table>
             </div>
-        </div>
+        </section>
     </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
-// live time
-function updateDateTime() {
-    const now = new Date();
-    const t = document.getElementById('current-time');
-    const d = document.getElementById('current-date');
-    if (t) t.textContent = now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
-    if (d) d.textContent = now.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
-}
-updateDateTime();
-setInterval(updateDateTime,1000);
+document.addEventListener('DOMContentLoaded', function () {
+    if (typeof Chart === 'undefined') return;
 
-// Chart.js global styling
-Chart.defaults.font.family = "'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI'";
-Chart.defaults.color = '#6b7280';
-Chart.defaults.plugins.legend.labels.boxWidth = 10;
-Chart.defaults.plugins.legend.labels.boxHeight = 10;
+    // Kulay mula sa design tokens para sumunod sa theme
+    const css = getComputedStyle(document.documentElement);
+    const tok = (name) => css.getPropertyValue(name).trim();
+    const primary = tok('--sx-primary'), accent = tok('--sx-accent'), muted = tok('--sx-muted'), grid = tok('--sx-border-light');
 
-function gradientFill(ctx, baseColor) {
-    const g = ctx.createLinearGradient(0,0,0,220);
-    g.addColorStop(0, baseColor);
-    g.addColorStop(1, 'rgba(255,255,255,0)');
-    return g;
-}
+    Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+    Chart.defaults.color = muted;
+    Chart.defaults.plugins.legend.labels.usePointStyle = true;
+    Chart.defaults.maintainAspectRatio = false;
 
-// Monthly revenue
-(function() {
-    const ctx = document.getElementById('salesChart').getContext('2d');
-    const grad = gradientFill(ctx,'rgba(37,99,235,0.35)');
-    new Chart(ctx,{
-        type:'line',
-        data:{
-            labels: <?php echo json_encode($months); ?>,
-            datasets:[{
-                data: <?php echo json_encode($totals); ?>,
-                borderColor:'#2563eb',
-                backgroundColor:grad,
-                tension:0.45,
-                fill:true,
-                pointRadius:4,
-                pointHoverRadius:6,
-                pointBackgroundColor:'#1d4ed8',
-                pointBorderColor:'#ffffff',
-                pointBorderWidth:2,
-                borderWidth:2.5
-            }]
-        },
-        options:{
-            plugins:{legend:{display:false}},
-            responsive:true,
-            maintainAspectRatio:false,
-            scales:{
-                y:{beginAtZero:true,grid:{color:'#e5e7eb'},ticks:{callback:v=>'₱'+v.toLocaleString()}},
-                x:{grid:{display:false}}
-            }
-        }
+    const peso = (v) => '₱' + Number(v).toLocaleString('en-PH');
+    const axes = (money) => ({
+        x: { grid: { display: false } },
+        y: { beginAtZero: true, grid: { color: grid }, ticks: { callback: money ? (v) => peso(v) : undefined, precision: 0 } },
     });
-})();
 
-// Lost sales
-(function() {
-    const ctx = document.getElementById('lostSalesChart').getContext('2d');
-    new Chart(ctx,{
-        type:'bar',
-        data:{
-            labels: <?php echo json_encode($lostSalesLabels); ?>,
-            datasets:[{
-                data: <?php echo json_encode($lostSalesTotals); ?>,
-                backgroundColor:'#f97373',
-                borderRadius:6,
-                maxBarThickness:26
-            }]
+    new Chart(document.getElementById('revenueChart'), {
+        type: 'bar',
+        data: {
+            labels: <?= json_encode($monthLabels) ?>,
+            datasets: [{ label: 'Revenue', data: <?= json_encode($monthRevenue) ?>, backgroundColor: primary, borderRadius: 6, maxBarThickness: 36 }],
         },
-        options:{
-            plugins:{legend:{display:false}},
-            responsive:true,
-            maintainAspectRatio:false,
-            scales:{
-                y:{beginAtZero:true,grid:{color:'#e5e7eb'},ticks:{callback:v=>'₱'+v.toLocaleString()}},
-                x:{grid:{display:false}}
-            }
-        }
+        options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => peso(c.parsed.y) } } }, scales: axes(true) },
     });
-})();
 
-// Orders funnel
-(function() {
-    const ctx = document.getElementById('ordersChart').getContext('2d');
-    new Chart(ctx,{
-        type:'doughnut',
-        data:{
-            labels:['Delivered','Pending','Preparing','Cancelled'],
-            datasets:[{
-                data:[<?php echo $deliveredOrders; ?>,<?php echo $pendingOrders; ?>,<?php echo $preparingOrders; ?>,<?php echo $cancelledOrders; ?>],
-                backgroundColor:['#22c55e','#facc15','#38bdf8','#f97373'],
-                borderWidth:1,
-                borderColor:'#f9fafb',
-                hoverOffset:8
-            }]
+    new Chart(document.getElementById('statusChart'), {
+        type: 'doughnut',
+        data: {
+            labels: <?= json_encode(array_keys($funnelData)) ?>,
+            datasets: [{
+                data: <?= json_encode(array_values($funnelData)) ?>,
+                backgroundColor: ['--sx-status-pending', '--sx-status-preparing', '--sx-status-delivered', '--sx-status-completed', '--sx-status-cancelled'].map(tok),
+                borderWidth: 0,
+            }],
         },
-        options:{
-            plugins:{legend:{position:'bottom'}},
-            cutout:'68%',
-            responsive:true,
-            maintainAspectRatio:false
-        }
+        options: { cutout: '65%', plugins: { legend: { position: 'bottom' } } },
     });
-})();
 
-// Top products
-(function() {
-    const ctx = document.getElementById('topProductsChart').getContext('2d');
-    new Chart(ctx,{
-        type:'bar',
-        data:{
-            labels: <?php echo json_encode(array_column($topProducts,'name')); ?>,
-            datasets:[{
-                data: <?php echo json_encode(array_column($topProducts,'qty')); ?>,
-                backgroundColor:'#0f766e',
-                borderRadius:8,
-                barThickness:22
-            }]
+    new Chart(document.getElementById('flowChart'), {
+        type: 'bar',
+        data: {
+            labels: <?= json_encode($flowLabels) ?>,
+            datasets: [
+                { label: 'Stock in', data: <?= json_encode($flowIn) ?>, backgroundColor: accent, borderRadius: 4, maxBarThickness: 18 },
+                { label: 'Stock out', data: <?= json_encode($flowOut) ?>, backgroundColor: primary, borderRadius: 4, maxBarThickness: 18 },
+            ],
         },
-        options:{
-            indexAxis:'y',
-            plugins:{legend:{display:false}},
-            responsive:true,
-            maintainAspectRatio:false,
-            scales:{
-                x:{grid:{color:'#e5e7eb'}},
-                y:{grid:{display:false}}
-            }
-        }
+        options: { plugins: { legend: { position: 'top', align: 'end' } }, scales: axes(false) },
     });
-})();
 
-// Weekly performance
-(function() {
-    const ctx = document.getElementById('salesPerWeekChart').getContext('2d');
-    new Chart(ctx,{
-        type:'bar',
-        data:{
-            labels: <?php echo json_encode($weekLabels); ?>,
-            datasets:[{
-                data: <?php echo json_encode($weekTotals); ?>,
-                backgroundColor:'#60a5fa',
-                borderRadius:8,
-                maxBarThickness:26
-            }]
+    new Chart(document.getElementById('topChart'), {
+        type: 'bar',
+        data: {
+            labels: <?= json_encode(array_column($topProducts, 'name')) ?>,
+            datasets: [{ label: 'Units sold', data: <?= json_encode(array_map('intval', array_column($topProducts, 'qty'))) ?>, backgroundColor: accent, borderRadius: 6, maxBarThickness: 22 }],
         },
-        options:{
-            plugins:{legend:{display:false}},
-            responsive:true,
-            maintainAspectRatio:false,
-            scales:{
-                y:{beginAtZero:true,grid:{color:'#e5e7eb'}},
-                x:{grid:{display:false}}
-            }
-        }
+        options: {
+            indexAxis: 'y',
+            plugins: { legend: { display: false } },
+            scales: { x: { beginAtZero: true, grid: { color: grid }, ticks: { precision: 0 } }, y: { grid: { display: false } } },
+        },
     });
-})();
+});
 </script>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>

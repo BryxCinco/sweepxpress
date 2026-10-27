@@ -1,15 +1,19 @@
 <?php
 /**
- * INVENTORY MANAGEMENT SYSTEM (Full Integrated Version)
- * Updated with AI-Lite Check Button + Mobile Card View
+ * admin/inventory.php — stock bawat produkto (galing sa inventory table), valuation,
+ * filters, QR label at QR scan na search. Galaw ng stock: stock_in / stock_out / stock_adjust.
  */
 
+if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/../includes/auth.php';
 if (!is_admin()) { header("Location: /sweepxpress/login.php"); exit; }
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/admin_products.php';
+
+$lowStock = 10; // pareho sa dashboard, products at product card
 
 // =================================================================================
-// 1. CSV EXPORT LOGIC
+// 1. CSV EXPORT
 // =================================================================================
 if (isset($_GET['action']) && $_GET['action'] === 'export') {
     if (ob_get_length()) ob_end_clean();
@@ -24,449 +28,314 @@ if (isset($_GET['action']) && $_GET['action'] === 'export') {
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $stock = (int)$row['real_stock'];
             $price = (float)$row['price'];
-            $capital = $stock * $price;
-            $status = ($stock == 0) ? 'Out of Stock' : (($stock <= 10) ? 'Low Stock' : 'In Stock');
-            fputcsv($output, [$row['id'], $row['name'], $row['sku'], number_format($price, 2, '.', ''), $stock, number_format($capital, 2, '.', ''), $status]);
+            $status = ($stock == 0) ? 'Out of Stock' : (($stock <= $lowStock) ? 'Low Stock' : 'In Stock');
+            fputcsv($output, [$row['id'], $row['name'], $row['sku'], number_format($price, 2, '.', ''), $stock, number_format($stock * $price, 2, '.', ''), $status]);
         }
     } catch (Exception $e) {}
     fclose($output);
     exit;
 }
 
-require_once __DIR__ . '/../includes/header.php';
-
 // =================================================================================
-// 2. DASHBOARD STATS (FIXED FOR ACCURATE COUNTING)
+// 2. STATS
 // =================================================================================
-// FIX: Using a JOIN on a subquery to correctly aggregate stock and calculate stats.
-$valStmt = $pdo->query("
-    SELECT 
-        SUM(product_stock.real_stock * p.price) as total_value,
-        COUNT(CASE WHEN product_stock.real_stock > 0 AND product_stock.real_stock <= 10 THEN 1 END) as low_stock_count,
-        COUNT(CASE WHEN product_stock.real_stock = 0 THEN 1 END) as out_of_stock_count
-    FROM products p
-    JOIN (
-        SELECT p.id, p.price, IFNULL(SUM(i.quantity), 0) AS real_stock
+$valData = $pdo->query("
+    SELECT
+        COUNT(*) AS products,
+        COALESCE(SUM(s.qty * s.price), 0) AS total_value,
+        COALESCE(SUM(s.qty), 0) AS units,
+        SUM(s.qty > 0 AND s.qty <= {$lowStock}) AS low_stock_count,
+        SUM(s.qty = 0) AS out_of_stock_count
+    FROM (
+        SELECT p.price, IFNULL(SUM(i.quantity), 0) AS qty
         FROM products p
         LEFT JOIN inventory i ON i.product_id = p.id
-        GROUP BY p.id
-    ) product_stock ON p.id = product_stock.id
-");
-
-$valData = $valStmt->fetch(PDO::FETCH_ASSOC);
-$totalValue = $valData['total_value'] ?? 0;
-$lowStockCount = $valData['low_stock_count'] ?? 0;
-$outOfStockCount = $valData['out_of_stock_count'] ?? 0;
+        GROUP BY p.id, p.price
+    ) s
+")->fetch(PDO::FETCH_ASSOC);
 
 // =================================================================================
-// 3. MAIN DATA LOGIC
+// 3. LIST
 // =================================================================================
-$limit = 12;
-$page = max(1, (int)($_GET['page'] ?? 1));
-$offset = ($page - 1) * $limit;
+$limit  = 15;
+$page   = max(1, (int)($_GET['page'] ?? 1));
 $search = trim($_GET['search'] ?? '');
-$filter = $_GET['filter'] ?? 'all';
+$filter = in_array($_GET['filter'] ?? '', ['low', 'out'], true) ? $_GET['filter'] : 'all';
 
 $params = [];
-$whereSql = "";
-if ($search) {
-    $whereSql = "WHERE (p.name LIKE :s OR p.sku LIKE :s)";
-    $params[':s'] = "%$search%";
+$whereSql = '';
+if ($search !== '') {
+    $whereSql = 'WHERE (p.name LIKE ? OR p.sku LIKE ?)';
+    $params = ["%{$search}%", "%{$search}%"];
 }
+$havingClause = match ($filter) {
+    'low'   => "HAVING real_stock > 0 AND real_stock <= {$lowStock}",
+    'out'   => 'HAVING real_stock = 0',
+    default => '',
+};
 
-$havingClause = "";
-if ($filter === 'low') $havingClause = "HAVING real_stock > 0 AND real_stock <= 10";
-elseif ($filter === 'out') $havingClause = "HAVING real_stock = 0";
+$base = "
+    SELECT p.id, p.name, COALESCE(p.sku, '') AS sku, COALESCE(p.price, 0) AS price, p.image_path,
+           IFNULL(SUM(i.quantity), 0) AS real_stock,
+           (SELECT MAX(created_at) FROM stock_movements WHERE product_id = p.id) AS last_move
+    FROM products p
+    LEFT JOIN inventory i ON i.product_id = p.id
+    {$whereSql}
+    GROUP BY p.id, p.name, p.sku, p.price, p.image_path
+    {$havingClause}
+";
 
-$sql = "SELECT p.id, p.name, COALESCE(p.sku,'') AS sku, COALESCE(p.price,0) AS price, IFNULL(SUM(i.quantity),0) AS real_stock FROM products p LEFT JOIN inventory i ON i.product_id = p.id $whereSql GROUP BY p.id $havingClause ORDER BY p.name ASC LIMIT :limit OFFSET :offset";
-$stmt = $pdo->prepare($sql);
-foreach ($params as $k => $v) $stmt->bindValue($k, $v);
-$stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-$stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-$stmt->execute();
+$countStmt = $pdo->prepare("SELECT COUNT(*) FROM ({$base}) t");
+$countStmt->execute($params);
+$totalProducts = (int)$countStmt->fetchColumn();
+$totalPages = max(1, (int)ceil($totalProducts / $limit));
+$page = min($page, $totalPages);
+$offset = ($page - 1) * $limit;
+
+// Low/out muna kapag "All" para unang makita ang kailangang i-restock
+$order = $filter === 'all' ? "(real_stock > {$lowStock}), real_stock ASC, name" : 'real_stock ASC, name';
+$stmt = $pdo->prepare("SELECT * FROM ({$base}) t ORDER BY {$order} LIMIT {$limit} OFFSET {$offset}");
+$stmt->execute($params);
 $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// The COUNT query needs to use the same logic including the HAVING clause
-$countSql = "SELECT COUNT(*) FROM (SELECT p.id, IFNULL(SUM(i.quantity),0) as real_stock FROM products p LEFT JOIN inventory i ON i.product_id = p.id $whereSql GROUP BY p.id $havingClause) as subquery";
-$countStmt = $pdo->prepare($countSql);
-foreach ($params as $k => $v) $countStmt->bindValue($k, $v);
-$countStmt->execute();
-$totalProducts = $countStmt->fetchColumn();
-$totalPages = max(1, ceil($totalProducts / $limit));
+$flash = sx_flash();
+$placeholder = '/sweepxpress/assets/placeholder.jpg';
+$url = function (array $changes = []) use ($search, $filter, $page) {
+    $q = array_filter(array_merge(['search' => $search, 'filter' => $filter === 'all' ? null : $filter, 'page' => $page > 1 ? $page : null], $changes),
+        fn($v) => $v !== null && $v !== '');
+    return 'inventory.php' . ($q ? '?' . http_build_query($q) : '');
+};
+
+require_once __DIR__ . '/../includes/header.php';
 ?>
 
-<script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-* { 
-    font-family: 'Inter', sans-serif; 
-    box-sizing: border-box; 
+/* ============================================================
+   INVENTORY (Phase 9e) — tokens + sx-table / sx-chip / ap-stock mula sa assets/style.css
+   ============================================================ */
+.iv { max-width: 1440px; padding-block: var(--sx-space-5) var(--sx-space-8); }
+.iv-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--sx-space-3); margin-bottom: var(--sx-space-5); }
+.iv-head p { margin: var(--sx-space-2) 0 0; color: var(--sx-muted); }
+.iv-head-actions { display: flex; flex-wrap: wrap; gap: var(--sx-space-2); }
+
+.iv-kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sx-space-3); margin-bottom: var(--sx-space-4); }
+.iv-kpi { padding: var(--sx-space-4); color: inherit; text-decoration: none; }
+.iv-kpi span { display: block; font-size: var(--sx-text-xs); font-weight: var(--sx-weight-semibold); color: var(--sx-muted); }
+.iv-kpi strong { display: block; margin-top: 4px; font-size: clamp(1.2rem, 1rem + 0.8vw, 1.6rem); font-weight: var(--sx-weight-extrabold); color: var(--sx-dark); }
+.iv-kpi.warn strong { color: var(--sx-status-pending); }
+.iv-kpi.danger strong { color: var(--sx-status-cancelled); }
+a.iv-kpi:hover { box-shadow: var(--sx-shadow-md); }
+
+.iv-moves { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sx-space-2); margin-bottom: var(--sx-space-4); }
+.iv-move {
+    display: flex;
+    align-items: center;
+    gap: var(--sx-space-3);
+    padding: var(--sx-space-3) var(--sx-space-4);
+    border: 1px solid var(--sx-border-light);
+    border-radius: var(--sx-radius-md);
+    background: var(--sx-surface);
+    color: var(--sx-dark);
+    font-weight: var(--sx-weight-semibold);
+    text-decoration: none;
 }
-body { 
-    background: #f8f9fb; 
-    color: #0f172a; 
-    overflow-x: hidden; 
+.iv-move:hover { border-color: var(--sx-primary); color: var(--sx-primary); }
+.iv-move i { display: grid; place-items: center; width: 34px; height: 34px; border-radius: var(--sx-radius-md); background: var(--sx-primary-soft); color: var(--sx-primary); }
+.iv-move.in i { background: var(--sx-accent-soft); color: var(--sx-accent-dark); }
+.iv-move.out i { background: var(--sx-status-pending-bg); color: var(--sx-status-pending); }
+
+.iv-tools { display: grid; gap: var(--sx-space-3); margin-bottom: var(--sx-space-4); padding: var(--sx-space-4); }
+.iv-search { display: flex; gap: var(--sx-space-2); }
+.iv-search .sx-input { flex: 1; min-width: 0; }
+.iv-chips { display: flex; flex-wrap: wrap; gap: var(--sx-space-2); }
+.iv-chips .sx-chip span { margin-left: 4px; opacity: 0.75; }
+
+.iv-table tbody tr { cursor: pointer; }
+.iv-table .num { text-align: right; white-space: nowrap; }
+.iv-prod { display: flex; align-items: center; gap: var(--sx-space-3); min-width: 200px; }
+.iv-prod img { flex-shrink: 0; width: 40px; height: 40px; border-radius: var(--sx-radius-md); background: var(--sx-surface-alt); object-fit: cover; }
+.iv-prod strong { display: block; color: var(--sx-dark); }
+.iv-prod small { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--sx-muted); }
+.iv-row-actions { display: flex; justify-content: flex-end; gap: var(--sx-space-1); }
+.iv-row-actions .sx-btn { padding: 6px 10px; }
+
+#scanner-modal .co-dialog-body { min-width: min(420px, 85vw); }
+
+@media (min-width: 768px) {
+    .iv-kpis { grid-template-columns: repeat(4, 1fr); }
+    .iv-moves { grid-template-columns: repeat(4, 1fr); }
+    .iv-tools { grid-template-columns: minmax(280px, 420px) 1fr; align-items: center; }
+    .iv-chips { justify-content: flex-end; }
 }
-.inventory-container { max-width: 1600px; margin: 0 auto; padding: 40px 32px 64px; }
-
-/* HEADER */
-.inventory-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; flex-wrap: wrap; gap: 20px; }
-.page-title-inventory { font-size: 2rem; font-weight: 800; color: #0f172a; margin: 0; display: flex; align-items: center; gap: 12px; }
-.page-title-inventory i { color: #8b5cf6; }
-.btn-back-inventory { padding: 12px 24px; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; color: #0f172a; font-weight: 600; text-decoration: none; display: flex; align-items: center; gap: 8px; transition: 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-.btn-back-inventory:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
-
-/* STATS */
-.stats-card-inventory { background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%); border-radius: 16px; padding: 24px 32px; display: flex; justify-content: space-between; align-items: center; color: #fff; margin-bottom: 32px; box-shadow: 0 10px 24px rgba(139,92,246,0.3); }
-.stats-left-inventory { display: flex; gap: 40px; flex-wrap: wrap; }
-.stat-item h2 { font-size: 0.9rem; font-weight: 600; text-transform: uppercase; opacity: 0.8; margin: 0 0 5px 0; }
-.stats-count-inventory { font-size: 1.5rem; font-weight: 800; margin: 0; }
-.stats-divider { width: 1px; background: rgba(255,255,255,0.3); height: 50px; }
-
-/* TOOLBAR */
-.toolbar-card-inventory { background: #fff; border-radius: 20px; border: 1px solid #e5e7eb; padding: 24px; margin-bottom: 24px; box-shadow: 0 10px 32px rgba(0,0,0,0.05); }
-.toolbar-top-row { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 24px; flex-wrap: wrap; }
-.search-form-inventory { flex: 1; display: flex; gap: 10px; max-width: 600px; position: relative; }
-.search-input-inventory { flex: 1; padding: 12px 16px 12px 48px; border: 1px solid #e5e7eb; border-radius: 12px; font-size: 0.95rem; background: #f9fafb; }
-.search-input-inventory:focus { outline:none; border-color:#8b5cf6; background:#fff; box-shadow: 0 0 0 3px rgba(139,92,246,0.1); }
-.search-icon-inventory { position: absolute; left: 18px; top: 50%; transform: translateY(-50%); color: #64748b; pointer-events: none; }
-.btn-search-inventory { background: #0f172a; color: #fff; border: none; padding: 0 24px; border-radius: 12px; font-weight: 600; cursor: pointer; }
-.btn-scan-camera { background: #f1f5f9; border: 1px solid #cbd5e1; padding: 0 16px; border-radius: 12px; font-size: 1.2rem; cursor: pointer; color: #334155; display: flex; align-items: center; }
-.btn-scan-camera:hover { color: #2563eb; border-color: #2563eb; }
-
-/* EXPORT & IMPORT BUTTONS */
-.btn-action-group { display: flex; gap: 10px; }
-.btn-export, .btn-import { background: #fff; border: 1px solid #cbd5e1; padding: 12px 24px; border-radius: 12px; color: #475569; font-weight: 600; text-decoration: none; display: flex; align-items: center; gap: 8px; transition:0.2s; }
-.btn-export:hover, .btn-import:hover { border-color: #94a3b8; color: #0f172a; background: #f1f5f9; }
-
-/* FILTERS */
-.filter-tabs { display: flex; gap: 20px; border-bottom: 2px solid #f1f5f9; padding-bottom: 10px; margin-bottom: 24px; overflow-x: auto; }
-.filter-tab { text-decoration: none; color: #64748b; font-weight: 600; padding: 8px 12px; display: flex; align-items: center; gap: 8px; border-radius: 8px; transition: 0.2s; }
-.filter-tab:hover, .filter-tab.active { background: #f5f3ff; color: #7c3aed; }
-.count-badge { background: #e2e8f0; color: #475569; font-size: 0.75rem; padding: 2px 8px; border-radius: 10px; }
-.filter-tab.active .count-badge { background: #ddd6fe; color: #5b21b6; }
-
-/* COLORFUL BUTTONS */
-.actions-grid-inventory { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
-.action-btn-inventory { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; background: #fff; border: 1px solid #e5e7eb; border-radius: 16px; text-decoration: none; transition: 0.2s; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }
-.action-btn-inventory:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,0,0,0.08); }
-.action-icon-inventory { width: 56px; height: 56px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; margin-bottom: 12px; color: #fff; }
-
-.green .action-icon-inventory { background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 8px 16px rgba(16,185,129,0.3); } .green:hover { border-color: #10b981; }
-.orange .action-icon-inventory { background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 8px 16px rgba(245,158,11,0.3); } .orange:hover { border-color: #f59e0b; }
-.purple .action-icon-inventory { background: linear-gradient(135deg, #8b5cf6, #7c3aed); box-shadow: 0 8px 16px rgba(139,92,246,0.3); } .purple:hover { border-color: #8b5cf6; }
-.cyan .action-icon-inventory { background: linear-gradient(135deg, #06b6d4, #0891b2); box-shadow: 0 8px 16px rgba(6,182,212,0.3); } .cyan:hover { border-color: #06b6d4; }
-
-/* TABLE */
-.table-card-inventory { background: #fff; border-radius: 20px; border: 1px solid #e5e7eb; overflow: hidden; margin-bottom: 30px; }
-.table-inventory { width: 100%; border-collapse: collapse; }
-.table-inventory th { background: #f8fafc; padding: 18px 24px; text-align: left; font-size: 0.8rem; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 1px solid #e2e8f0; }
-.table-inventory td { padding: 18px 24px; border-bottom: 1px solid #f1f5f9; color: #334155; vertical-align: middle; }
-.table-inventory tr:hover { background: #f8fafc; cursor: pointer; }
-.status-pill { padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; }
-.pill-green { background: #dcfce7; color: #166534; } .pill-orange { background: #ffedd5; color: #9a3412; } .pill-red { background: #fee2e2; color: #991b1b; }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-.btn-qr { width: 36px; height: 36px; border: 1px solid #e2e8f0; background: #fff; border-radius: 8px; cursor: pointer; color: #64748b; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
-.btn-qr:hover { background: #f1f5f9; color: #0f172a; border-color: #94a3b8; }
-
-#scanner-modal { display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; }
-#scanner-content { background: #fff; padding: 24px; border-radius: 16px; width: 90%; max-width: 450px; text-align: center; position: relative; }
-#scanner-preview { width: 100%; height: 300px; background: #000; margin: 16px 0; border-radius: 8px; overflow: hidden; }
-.btn-close-scanner { position: absolute; top: 16px; right: 16px; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #64748b; }
-
-.pagination { display: flex; justify-content: center; gap: 8px; padding: 24px; flex-wrap: wrap; } 
-.pagination a { padding: 10px 16px; border: 1px solid #e5e7eb; border-radius: 8px; text-decoration: none; color: #0f172a; font-weight: 600; }
-.pagination a.active { background: #0f172a; color: #fff; border-color: #0f172a; }
-.empty-state-inventory { padding: 80px 20px; text-align: center; color: #94a3b8; }
-.empty-state-inventory i { font-size: 4rem; margin-bottom: 24px; color: #e2e8f0; }
-
-/* MOBILE: TABLE → CARD VIEW - UPDATED */
-@media (max-width: 768px) {
-    .inventory-container { padding: 24px 16px; }
-    .inventory-header { flex-direction: column; align-items: flex-start; }
-    .btn-back-inventory { width: 100%; justify-content: center; }
-    .stats-card-inventory { flex-direction: column; align-items: flex-start; gap: 24px; }
-    .stats-divider { display: none; }
-    .toolbar-top-row { flex-direction: column; align-items: stretch; }
-    .actions-grid-inventory { grid-template-columns: repeat(2, 1fr); }
-    .btn-action-group { flex-direction: column; width: 100%; }
-    .btn-export, .btn-import { width: 100%; justify-content: center; }
-
-    /* Wrapper clean for cards */
-    .table-card-inventory { border: none; background: transparent; overflow: visible; }
-    .table-inventory { border-collapse: separate; border-spacing: 0 16px; }
-    .table-inventory thead { display: none; }
-    .table-inventory tbody,
-    .table-inventory tr,
-    .table-inventory td { display: block; width: 100%; }
-
-    /* Card style per row */
-    .table-inventory tr {
-        background: #ffffff;
-        border-radius: 16px;
-        padding: 16px; 
-        box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
-        border: 1px solid #e5e7eb;
-        cursor: pointer;
-        margin-bottom: 16px; 
-    }
-
-    .table-inventory tr:hover { background: #ffffff; }
-
-    .table-inventory td {
-        padding: 6px 0;
-        border: none;
-        text-align: right !important; 
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        width: 100%;
-    }
-
-    /* General Data Label: Use the data-label attribute for the title */
-    .table-inventory td::before {
-        content: attr(data-label);
-        font-weight: 600;
-        color: #64748b;
-        font-size: 0.8rem;
-        text-transform: uppercase;
-        text-align: left;
-        flex-shrink: 0;
-    }
-
-    /* Product Name (2nd column): Make it the main title and remove label */
-    .table-inventory td:nth-child(2) {
-        font-size: 1.1rem;
-        font-weight: 800;
-        color: #0f172a;
-        margin-bottom: 8px;
-        display: block; 
-        text-align: left !important;
-    }
-    .table-inventory td:nth-child(2)::before {
-        content: none; 
-    }
-
-    /* SKU (3rd column) & ID (1st column) smaller/subtle */
-    .table-inventory td:nth-child(1),
-    .table-inventory td:nth-child(3) {
-        font-size: 0.85rem;
-        color: #94a3b8;
-    }
-    
-    /* Stock (5th column): Emphasize stock count */
-    .table-inventory td:nth-child(5) { 
-        font-size: 1.2rem;
-        font-weight: 800;
-        color: #8b5cf6;
-        padding-top: 10px;
-        border-top: 1px solid #f1f5f9; 
-        margin-top: 8px;
-    }
-
-    /* Status (7th column): Align pill to the right */
-    .table-inventory td:nth-child(7) {
-        justify-content: flex-end;
-        padding: 4px 0;
-    }
-    .table-inventory td:nth-child(7) .status-pill {
-        display: inline-flex;
-    }
-    .table-inventory td:nth-child(7)::before {
-        content: none; 
-    }
-
-    /* QR Button (8th column) */
-    .table-inventory td:nth-child(8) {
-        display: block;
-        text-align: right !important;
-        padding: 8px 0 0;
-    }
-    .table-inventory td:nth-child(8)::before {
-        content: none;
-    }
-    .btn-qr {
-        width: 32px;
-        height: 32px;
-    }
+@media (max-width: 767.98px) {
+    .iv-table .hide-sm { display: none; }
 }
 </style>
 
-<div class="inventory-container">
-    <div class="inventory-header">
+<div class="iv sx-container">
+    <div class="iv-head">
         <div>
-            <h1 class="page-title-inventory"><i class="fas fa-boxes-stacked"></i> Inventory Management</h1>
-            <p class="page-subtitle-inventory">Track stock levels, valuation, and print labels.</p>
+            <span class="sx-eyebrow">Warehouse</span>
+            <h1 class="sx-heading-lg">Inventory</h1>
+            <p>Stock levels per product, valued at selling price.</p>
         </div>
-        <a href="dashboard.php" class="btn-back-inventory"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
-    </div>
-
-    <div class="stats-card-inventory">
-        <div class="stats-left-inventory">
-            <div class="stat-item">
-                <h2>Total Products</h2>
-                <div class="stats-count-inventory"><?= number_format($totalProducts) ?></div>
-            </div>
-            <div class="stats-divider"></div>
-            <div class="stat-item">
-                <h2>Total Valuation</h2>
-                <div class="stats-count-inventory">₱<?= number_format($totalValue, 2) ?></div>
-            </div>
-            <div class="stats-divider"></div>
-            <div class="stat-item">
-                <h2>Needs Reorder</h2>
-                <div class="stats-count-inventory" style="color:#fcd34d">
-                    <?= number_format($lowStockCount + $outOfStockCount) ?>
-                    <?php if($outOfStockCount > 0): ?>
-                        <span style="font-size:0.75rem; color:#fee2e2">(<?= $outOfStockCount ?> Out)</span>
-                    <?php endif; ?>
-                </div>
-            </div>
-        </div>
-        <div style="background:rgba(255,255,255,0.2); padding:8px 16px; border-radius:8px; font-weight:600">
-            Page <?= $page ?> of <?= $totalPages ?>
+        <div class="iv-head-actions">
+            <a href="cron_stock_alert.php" target="_blank" class="sx-btn sx-btn-outline sx-btn-sm" title="Check for low stock and send the alert email">
+                <i class="fa-solid fa-bell"></i> Stock check
+            </a>
+            <a href="import_csv.php" class="sx-btn sx-btn-outline sx-btn-sm"><i class="fa-solid fa-file-import"></i> Import CSV</a>
+            <a href="inventory.php?action=export" class="sx-btn sx-btn-outline sx-btn-sm"><i class="fa-solid fa-file-csv"></i> Export CSV</a>
         </div>
     </div>
 
-    <div class="toolbar-card-inventory">
-        <div class="toolbar-top-row">
-            <form method="GET" class="search-form-inventory" id="searchForm">
-                <input type="hidden" name="filter" value="<?= htmlspecialchars($filter) ?>">
-                <i class="fas fa-search search-icon-inventory"></i>
-                <input type="text" name="search" id="searchInput" class="search-input-inventory" placeholder="Search product name or SKU..." value="<?= htmlspecialchars($search) ?>">
-                <button type="button" class="btn-scan-camera" onclick="openScanner()" title="Scan QR Code"><i class="fas fa-qrcode"></i></button>
-                <button type="submit" class="btn-search-inventory">Search</button>
-            </form>
+    <?php if ($flash): ?>
+        <div class="sx-alert sx-alert-<?= h($flash[0]) ?>" role="status" style="margin-bottom: var(--sx-space-4)">
+            <i class="fa-solid fa-circle-check"></i><div><?= h($flash[1]) ?></div>
+        </div>
+    <?php endif; ?>
 
-            <div class="btn-action-group">
-                <a href="cron_stock_alert.php" target="_blank" class="btn-import" style="border-color: #eab308; color: #b45309; background: #fefce8;" title="Check for low stock and send email">
-                    <i class="fas fa-bell"></i> Stock Check
-                </a>
+    <div class="iv-kpis">
+        <div class="sx-card iv-kpi"><span>Stock value</span><strong>₱<?= number_format((float)$valData['total_value'], 2) ?></strong></div>
+        <div class="sx-card iv-kpi"><span>Units on hand</span><strong><?= number_format((int)$valData['units']) ?></strong></div>
+        <a href="<?= h($url(['filter' => 'low', 'page' => null])) ?>" class="sx-card iv-kpi warn"><span>Low stock (≤ <?= $lowStock ?>)</span><strong><?= (int)$valData['low_stock_count'] ?></strong></a>
+        <a href="<?= h($url(['filter' => 'out', 'page' => null])) ?>" class="sx-card iv-kpi danger"><span>Out of stock</span><strong><?= (int)$valData['out_of_stock_count'] ?></strong></a>
+    </div>
 
-                <a href="import_csv.php" class="btn-import"><i class="fas fa-file-import"></i> Import CSV</a>
-                <a href="inventory.php?action=export" class="btn-export"><i class="fas fa-file-csv"></i> Export CSV</a>
+    <div class="iv-moves">
+        <a href="stock_in.php" class="iv-move in"><i class="fa-solid fa-arrow-down"></i> Stock in</a>
+        <a href="stock_out.php" class="iv-move out"><i class="fa-solid fa-arrow-up"></i> Stock out</a>
+        <a href="stock_adjust.php" class="iv-move"><i class="fa-solid fa-sliders"></i> Adjust</a>
+        <a href="inventory_full_history.php" class="iv-move"><i class="fa-solid fa-clock-rotate-left"></i> Full history</a>
+    </div>
+
+    <div class="sx-card iv-tools">
+        <form method="GET" class="iv-search" id="searchForm" role="search">
+            <?php if ($filter !== 'all'): ?><input type="hidden" name="filter" value="<?= h($filter) ?>"><?php endif; ?>
+            <input type="search" name="search" id="searchInput" class="sx-input" placeholder="Search product name or SKU…" value="<?= h($search) ?>" aria-label="Search inventory">
+            <button type="button" class="sx-btn sx-btn-outline sx-btn-sm" id="openScanner" title="Scan a product QR label" aria-label="Scan QR label"><i class="fa-solid fa-qrcode"></i></button>
+            <button type="submit" class="sx-btn sx-btn-dark sx-btn-sm" aria-label="Search"><i class="fa-solid fa-magnifying-glass"></i></button>
+        </form>
+        <div class="iv-chips">
+            <a href="<?= h($url(['filter' => null, 'page' => null])) ?>" class="sx-chip<?= $filter === 'all' ? ' active' : '' ?>">All items <span><?= (int)$valData['products'] ?></span></a>
+            <a href="<?= h($url(['filter' => 'low', 'page' => null])) ?>" class="sx-chip<?= $filter === 'low' ? ' active' : '' ?>">Low stock <span><?= (int)$valData['low_stock_count'] ?></span></a>
+            <a href="<?= h($url(['filter' => 'out', 'page' => null])) ?>" class="sx-chip<?= $filter === 'out' ? ' active' : '' ?>">Out of stock <span><?= (int)$valData['out_of_stock_count'] ?></span></a>
+        </div>
+    </div>
+
+    <?php if ($products): ?>
+        <div class="sx-card" style="padding: 0; overflow: hidden">
+            <div class="sx-table-wrap" style="border: 0; border-radius: 0">
+                <table class="sx-table iv-table">
+                    <thead>
+                        <tr>
+                            <th>Product</th>
+                            <th class="num hide-sm">Price</th>
+                            <th>Stock</th>
+                            <th class="num hide-sm">Value</th>
+                            <th class="hide-sm">Last movement</th>
+                            <th class="num"><span class="visually-hidden">Actions</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($products as $p):
+                            $stock = (int)$p['real_stock'];
+                            $cls = $stock === 0 ? 'out' : ($stock <= $lowStock ? 'low' : 'in');
+                            $historyUrl = 'product_history.php?product_id=' . (int)$p['id'];
+                        ?>
+                            <tr data-href="<?= $historyUrl ?>">
+                                <td>
+                                    <div class="iv-prod">
+                                        <img src="<?= h($p['image_path'] ?: $placeholder) ?>" alt="" loading="lazy" onerror="this.src='<?= $placeholder ?>'">
+                                        <div><strong><?= h($p['name']) ?></strong><small><?= h($p['sku'] ?: '—') ?></small></div>
+                                    </div>
+                                </td>
+                                <td class="num hide-sm">₱<?= number_format((float)$p['price'], 2) ?></td>
+                                <td><span class="ap-stock <?= $cls ?>"><?= $stock === 0 ? 'Out' : number_format($stock) ?></span></td>
+                                <td class="num hide-sm">₱<?= number_format($stock * (float)$p['price'], 2) ?></td>
+                                <td class="hide-sm"><?= $p['last_move'] ? date('M j, Y', strtotime($p['last_move'])) : '—' ?></td>
+                                <td>
+                                    <div class="iv-row-actions">
+                                        <a href="stock_in.php?product_id=<?= (int)$p['id'] ?>" class="sx-btn sx-btn-outline sx-btn-sm" title="Stock in" aria-label="Stock in <?= h($p['name']) ?>"><i class="fa-solid fa-plus"></i></a>
+                                        <button type="button" class="sx-btn sx-btn-ghost sx-btn-sm" data-qr="<?= h($p['name']) ?>" title="Print QR label" aria-label="Print QR label for <?= h($p['name']) ?>"><i class="fa-solid fa-qrcode"></i></button>
+                                        <a href="<?= $historyUrl ?>" class="sx-btn sx-btn-ghost sx-btn-sm" title="History" aria-label="History of <?= h($p['name']) ?>"><i class="fa-solid fa-chevron-right"></i></a>
+                                    </div>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
             </div>
         </div>
 
-        <div class="filter-tabs">
-            <a href="inventory.php?filter=all" class="filter-tab <?= $filter==='all'?'active':'' ?>">All Items</a>
-            <a href="inventory.php?filter=low" class="filter-tab <?= $filter==='low'?'active':'' ?>">Low Stock <span class="count-badge"><?= $lowStockCount ?></span></a>
-            <a href="inventory.php?filter=out" class="filter-tab <?= $filter==='out'?'active':'' ?>">Out of Stock <span class="count-badge"><?= $outOfStockCount ?></span></a>
+        <div class="ap-pager">
+            <span>Showing <?= $offset + 1 ?>–<?= $offset + count($products) ?> of <?= $totalProducts ?></span>
+            <?php if ($totalPages > 1): ?>
+                <nav aria-label="Pages">
+                    <?php if ($page > 1): ?><a href="<?= h($url(['page' => $page - 1])) ?>" aria-label="Previous page"><i class="fa-solid fa-chevron-left"></i></a><?php endif; ?>
+                    <?php for ($i = max(1, $page - 2); $i <= min($totalPages, $page + 2); $i++): ?>
+                        <?php if ($i === $page): ?><span class="cur" aria-current="page"><?= $i ?></span>
+                        <?php else: ?><a href="<?= h($url(['page' => $i])) ?>"><?= $i ?></a><?php endif; ?>
+                    <?php endfor; ?>
+                    <?php if ($page < $totalPages): ?><a href="<?= h($url(['page' => $page + 1])) ?>" aria-label="Next page"><i class="fa-solid fa-chevron-right"></i></a><?php endif; ?>
+                </nav>
+            <?php endif; ?>
         </div>
-
-        <div class="actions-grid-inventory">
-            <a href="stock_in.php" class="action-btn-inventory green">
-                <div class="action-icon-inventory green"><i class="fas fa-arrow-down"></i></div>
-                <span class="action-label-inventory">Stock In</span>
-            </a>
-            <a href="stock_out.php" class="action-btn-inventory orange">
-                <div class="action-icon-inventory orange"><i class="fas fa-arrow-up"></i></div>
-                <span class="action-label-inventory">Stock Out</span>
-            </a>
-            <a href="stock_adjust.php" class="action-btn-inventory purple">
-                <div class="action-icon-inventory purple"><i class="fas fa-sliders-h"></i></div>
-                <span class="action-label-inventory">Adjust Stock</span>
-            </a>
-            <a href="inventory_full_history.php" class="action-btn-inventory cyan">
-                <div class="action-icon-inventory cyan"><i class="fas fa-history"></i></div>
-                <span class="action-label-inventory">Full History</span>
-            </a>
-        </div>
-    </div>
-
-    <div class="table-card-inventory">
-        <table class="table-inventory">
-            <thead>
-                <tr>
-                    <th width="5%">ID</th>
-                    <th width="25%">Product Name</th>
-                    <th width="15%">SKU</th>
-                    <th width="12%" style="text-align:right">Price</th>
-                    <th width="10%" style="text-align:center">Stock</th>
-                    <th width="15%" style="text-align:right">Capital Tied</th>
-                    <th width="13%" style="text-align:center">Status</th>
-                    <th width="5%" style="text-align:center">QR</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php if (!$products): ?>
-                    <tr><td colspan="8"><div class="empty-state-inventory"><i class="fas fa-search"></i><h3>No Products Found</h3></div></td></tr>
-                <?php else: foreach ($products as $p):
-                    $stock = (int)$p['real_stock'];
-                    $capital = $stock * $p['price'];
-                    $stClass = ($stock==0) ? 'pill-red' : (($stock<=10) ? 'pill-orange' : 'pill-green');
-                    $stText = ($stock==0) ? 'Out of Stock' : (($stock<=10) ? 'Low Stock' : 'In Stock');
-                ?>
-                <tr onclick="window.location.href='product_history.php?product_id=<?= $p['id'] ?>'">
-                    <td data-label="ID" style="color:#64748b;font-weight:600"><?= $p['id'] ?></td>
-                    <td data-label="Product Name" style="font-weight:700;color:#0f172a"><?= htmlspecialchars($p['name']) ?></td>
-                    <td data-label="SKU" style="font-family:monospace;color:#64748b"><?= htmlspecialchars($p['sku']) ?></td>
-                    <td data-label="Price" style="text-align:right;font-weight:600">₱<?= number_format($p['price'], 2) ?></td>
-                    <td data-label="Stock" style="text-align:center;font-weight:800;font-size:1.1rem"><?= $stock ?></td>
-                    <td data-label="Capital Tied" style="text-align:right;color:#475569">₱<?= number_format($capital, 2) ?></td>
-                    <td data-label="Status" style="text-align:center"><span class="status-pill <?= $stClass ?>"><span class="dot"></span><?= $stText ?></span></td>
-                    <td data-label="QR" style="text-align:center" onclick="event.stopPropagation()">
-                        <button type="button" class="btn-qr" onclick="printQR('<?= addslashes($p['name']) ?>', '<?= addslashes($p['name']) ?>')"><i class="fas fa-qrcode"></i></button>
-                    </td>
-                </tr>
-                <?php endforeach; endif; ?>
-            </tbody>
-        </table>
-    </div>
-
-    <?php if ($totalPages > 1): ?>
-        <div class="pagination">
-            <?php for ($i=1; $i<=$totalPages; $i++): $qs='?page='.$i.'&filter='.$filter.($search?'&search='.urlencode($search):''); ?>
-                <a href="inventory.php<?= $qs ?>" class="<?= ($i==$page)?'active':'' ?>"><?= $i ?></a>
-            <?php endfor; ?>
+    <?php else: ?>
+        <div class="sx-card sx-empty">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <h3>No products found</h3>
+            <p>Try a different search or filter.</p>
         </div>
     <?php endif; ?>
 </div>
 
-<div id="scanner-modal">
-    <div id="scanner-content">
-        <button class="btn-close-scanner" onclick="closeScanner()">&times;</button>
-        <h3><i class="fas fa-camera"></i> Scan Product QR</h3>
-        <p style="color:#64748b;margin-bottom:10px">Point camera at a product label to search.</p>
+<dialog class="co-dialog" id="scanner-modal" aria-labelledby="scanTitle">
+    <div class="co-dialog-head">
+        <h3 id="scanTitle"><i class="fa-solid fa-camera"></i> Scan product QR</h3>
+        <button type="button" class="sx-btn sx-btn-ghost sx-btn-sm" id="closeScanner" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="co-dialog-body">
+        <p class="sx-hint" style="margin-top: 0">Point the camera at a product label to search for it.</p>
         <div id="scanner-preview"></div>
     </div>
-</div>
+</dialog>
 
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
-function printQR(data, name) {
-    const url = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(data)}`;
-    const win = window.open('', 'Print', 'width=400,height=500');
-    win.document.write(`<html><body style="text-align:center;font-family:sans-serif;padding:40px;"><div style="border:3px solid black;border-radius:10px;padding:20px;display:inline-block;"><img src="${url}" width="150" height="150"><br><h2 style="margin:10px 0;">${name}</h2></div><br><br><button onclick="window.print()" style="padding:10px 20px;">Print Label</button></body></html>`);
-    win.document.close();
-}
-let scanner = null;
-function openScanner() {
-    document.getElementById('scanner-modal').style.display = 'flex';
-    if (!scanner) {
-        scanner = new Html5QrcodeScanner("scanner-preview", { fps: 10, qrbox: 250 }, false); 
-        scanner.render(onScanSuccess, onScanError);
-    }
-}
-function closeScanner() {
-    document.getElementById('scanner-modal').style.display = 'none';
-    if(scanner) { 
-        scanner.clear().catch(error => {
-            console.error("Failed to clear scanner:", error);
-        });
-        scanner = null; 
-    }
-}
-function onScanSuccess(decodedText) {
-    document.getElementById('searchInput').value = decodedText;
-    closeScanner();
-    document.getElementById('searchForm').submit();
-}
-function onScanError(errorMessage) {
-    // console.log(`Scanner Error: ${errorMessage}`);
-}
-window.onclick = function(e) { if(e.target == document.getElementById('scanner-modal')) closeScanner(); }
+document.addEventListener('DOMContentLoaded', function () {
+    // Buong row → product history (maliban kapag pinindot ang button/link sa loob)
+    document.querySelectorAll('.iv-table tr[data-href]').forEach((tr) => tr.addEventListener('click', (e) => {
+        if (!e.target.closest('a, button')) window.location.href = tr.dataset.href;
+    }));
+
+    // QR label: pangalan ng produkto ang laman (ito rin ang hinahanap ng scanner)
+    document.querySelectorAll('[data-qr]').forEach((btn) => btn.addEventListener('click', () => {
+        const name = btn.dataset.qr;
+        const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const url = 'https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=' + encodeURIComponent(name);
+        const win = window.open('', 'Print', 'width=400,height=500');
+        win.document.write(`<html><body style="text-align:center;font-family:sans-serif;padding:40px;"><div style="border:3px solid black;border-radius:10px;padding:20px;display:inline-block;"><img src="${url}" width="150" height="150"><br><h2 style="margin:10px 0;">${esc(name)}</h2></div><br><br><button onclick="window.print()" style="padding:10px 20px;">Print Label</button></body></html>`);
+        win.document.close();
+    }));
+
+    // QR scanner → search
+    const dialog = document.getElementById('scanner-modal');
+    let scanner = null;
+    const stop = () => { if (scanner) { scanner.clear().catch(() => {}); scanner = null; } };
+    document.getElementById('openScanner').addEventListener('click', () => {
+        if (typeof Html5QrcodeScanner === 'undefined') { sxToast('Scanner could not load', 'error'); return; }
+        dialog.showModal();
+        scanner = new Html5QrcodeScanner('scanner-preview', { fps: 10, qrbox: 250 }, false);
+        scanner.render((text) => {
+            stop();
+            dialog.close();
+            document.getElementById('searchInput').value = text;
+            document.getElementById('searchForm').submit();
+        }, () => {});
+    });
+    document.getElementById('closeScanner').addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', stop);
+});
 </script>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
