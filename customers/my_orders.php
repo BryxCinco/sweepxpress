@@ -1,14 +1,8 @@
 <?php
 
 require_once __DIR__ . '/../config.php';
-require_once __DIR__ . '/../includes/header.php';
 
-if (!function_exists('h')) {
-    function h($text) {
-        return htmlspecialchars($text ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-    }
-}
-
+// Login check bago ang header (dati pagkatapos, kaya hindi gumagana ang redirect)
 if (!is_logged_in()) {
     header("Location: /sweepxpress/login.php");
     exit();
@@ -16,612 +10,342 @@ if (!is_logged_in()) {
 
 $user_id = $_SESSION['user']['id'];
 
-// Fetch the user's orders, joining with the deliveries table
+// Status → [label, pill class, tab]
+// "shipped" ay ipinapakita pa ring "Preparing" (gaya ng dati)
+$statusMap = [
+    'pending'                => ['Pending',          'pending',   'pending'],
+    'Pending PO'             => ['PO under review',  'pending',   'pending'],
+    'preparing'              => ['Preparing',        'preparing', 'preparing'],
+    'shipped'                => ['Preparing',        'preparing', 'preparing'],
+    'delivered'              => ['Delivered',        'delivered', 'delivered'],
+    'completed'              => ['Completed',        'completed', 'completed'],
+    'cancellation_requested' => ['Cancel requested', 'cancelled', 'cancelled'],
+    'cancelled'              => ['Cancelled',        'cancelled', 'cancelled'],
+];
+$tabs = [
+    'all'       => 'All',
+    'pending'   => 'Pending',
+    'preparing' => 'Preparing',
+    'delivered' => 'Delivered',
+    'completed' => 'Completed',
+    'cancelled' => 'Cancelled',
+];
+
 try {
+    // Isang delivery row lang bawat order (iwas dobleng card kung may duplicate sa deliveries)
     $stmt = $pdo->prepare("
-        SELECT 
-            o.*, 
-            d.delivery_date, 
-            d.status AS delivery_status 
+        SELECT o.*, d.delivery_date
         FROM orders o
-        LEFT JOIN deliveries d ON o.id = d.order_id
-        WHERE o.user_id = ? 
+        LEFT JOIN (
+            SELECT order_id, MAX(delivery_date) AS delivery_date
+            FROM deliveries
+            GROUP BY order_id
+        ) d ON d.order_id = o.id
+        WHERE o.user_id = ?
         ORDER BY o.created_at DESC
     ");
     $stmt->execute([$user_id]);
     $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Lahat ng items ng user sa isang query, naka-group bawat order
+    $itemsByOrder = [];
+    if ($orders) {
+        $stmt = $pdo->prepare("
+            SELECT oi.order_id, oi.quantity, p.name, p.image_path
+            FROM order_items oi
+            JOIN orders o ON o.id = oi.order_id
+            LEFT JOIN products p ON p.id = oi.product_id
+            WHERE o.user_id = ?
+            ORDER BY oi.id
+        ");
+        $stmt->execute([$user_id]);
+        foreach ($stmt as $row) {
+            $itemsByOrder[$row['order_id']][] = $row;
+        }
+    }
 } catch (PDOException $e) {
-    die("Database error: " . $e->getMessage());
+    error_log('my_orders.php: ' . $e->getMessage());
+    $orders = [];
+    $itemsByOrder = [];
+    $loadError = true;
 }
+
+// Bilang bawat tab
+$tabCounts = array_fill_keys(array_keys($tabs), 0);
+$tabCounts['all'] = count($orders);
+foreach ($orders as $o) {
+    $tab = $statusMap[$o['status'] ?? ''][2] ?? 'pending';
+    $tabCounts[$tab]++;
+}
+
+require_once __DIR__ . '/../includes/header.php';
 ?>
 
 <style>
-/* ============================================
-   MY ORDERS - CARD GRID VERSION (HUMAN DESIGN)
-   Clean, Professional, Real E-Commerce Feel
-   Fully Responsive: 320px → 2560px+
-   ============================================ */
-
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-:root {
-    /* Colors */
-    --primary: #2563eb;
-    --primary-dark: #1e40af;
-    --primary-light: #dbeafe;
-    
-    --success: #10b981;
-    --success-light: #d1fae5;
-    --warning: #f59e0b;
-    --warning-light: #fef3c7;
-    --error: #ef4444;
-    --error-light: #fee2e2;
-    
-    /* Neutrals */
-    --gray-50: #f9fafb;
-    --gray-100: #f3f4f6;
-    --gray-200: #e5e7eb;
-    --gray-300: #d1d5db;
-    --gray-400: #9ca3af;
-    --gray-500: #6b7280;
-    --gray-600: #4b5563;
-    --gray-700: #374151;
-    --gray-800: #1f2937;
-    --gray-900: #111827;
-    
-    /* Spacing */
-    --s-1: 8px;
-    --s-2: 12px;
-    --s-3: 16px;
-    --s-4: 20px;
-    --s-5: 24px;
-    --s-6: 32px;
-    
-    /* Typography */
-    --text-xs: 12px;
-    --text-sm: 14px;
-    --text-base: 16px;
-    --text-lg: 18px;
-    --text-xl: 20px;
-    --text-2xl: 24px;
-    
-    /* Radius */
-    --radius: 6px;
-    --radius-lg: 8px;
-    --radius-xl: 12px;
-    
-    /* Shadows */
-    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
-    --shadow: 0 1px 3px rgba(0,0,0,0.1);
-    --shadow-md: 0 4px 6px rgba(0,0,0,0.07);
-}
-
-/* ============== FULL SCREEN FIX ============== */
-html {
-    height: 100%;
-}
-
-body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    -webkit-font-smoothing: antialiased;
-    background: var(--gray-50);
-    color: var(--gray-900);
-    min-height: 100vh;
+/* ============================================================
+   MY ORDERS (Phase 9d) — tokens + sx-pill / sx-chip mula sa assets/style.css
+   ============================================================ */
+.mo { padding-block: var(--sx-space-5) var(--sx-space-8); }
+.mo-head {
     display: flex;
-    flex-direction: column;
-}
-
-.orders-container {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: var(--s-5) var(--s-3);
-    width: 100%;
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-}
-
-/* Header */
-.orders-header {
-    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
     justify-content: space-between;
-    align-items: center;
-    margin-bottom: var(--s-5);
-    gap: var(--s-3);
+    gap: var(--sx-space-3);
+    margin-bottom: var(--sx-space-5);
 }
+.mo-head p { margin: var(--sx-space-2) 0 0; color: var(--sx-muted); }
 
-.orders-title {
-    font-size: var(--text-2xl);
-    font-weight: 700;
-    color: var(--gray-900);
-    margin: 0;
+/* Status tabs (gaya ng "To Pay / To Ship" sa Shopee) */
+.mo-tabs {
+    position: sticky;
+    top: var(--sx-nav-h, 70px);
+    z-index: 5;
     display: flex;
-    align-items: center;
-    gap: var(--s-2);
+    gap: var(--sx-space-2);
+    margin: 0 calc(var(--sx-space-4) * -1) var(--sx-space-4);
+    padding: var(--sx-space-3) var(--sx-space-4);
+    overflow-x: auto;
+    scrollbar-width: none;
+    background: var(--sx-bg);
 }
-
-.orders-icon {
-    color: var(--primary);
-}
-
-.btn-shop {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--s-1);
-    padding: 10px var(--s-4);
-    background: var(--primary);
-    color: white;
-    border: none;
-    border-radius: var(--radius-lg);
-    font-size: var(--text-base);
-    font-weight: 600;
-    text-decoration: none;
-    transition: all 0.15s;
-}
-
-.btn-shop:hover {
-    background: var(--primary-dark);
-    color: white;
-}
-
-/* Stats */
-.stats-card {
-    display: flex;
-    align-items: center;
-    gap: var(--s-3);
-    padding: var(--s-4);
-    background: white;
-    border: 1px solid var(--gray-200);
-    border-radius: var(--radius-lg);
-    margin-bottom: var(--s-5);
-}
-
-.stats-icon {
-    width: 48px;
-    height: 48px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--primary-light);
-    border-radius: var(--radius-lg);
-    color: var(--primary);
-    font-size: var(--text-xl);
-}
-
-.stats-content h2 {
-    font-size: var(--text-xs);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--gray-500);
-    margin: 0 0 4px 0;
-}
-
-.stats-value {
-    font-size: var(--text-2xl);
-    font-weight: 700;
-    color: var(--gray-900);
-}
-
-/* Orders Grid */
-.orders-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: var(--s-4);
-}
-
-/* Order Card */
-.order-card {
-    background: white;
-    border: 1px solid var(--gray-200);
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-    transition: all 0.15s;
-    position: relative;
-}
-
-.order-card:hover {
-    box-shadow: var(--shadow-md);
-    transform: translateY(-1px);
-}
-
-.order-card.has-notification {
-    border-left: 3px solid var(--warning);
-    background: #fffbf5;
-}
-
-.order-card.has-notification::before {
-    content: 'New Update';
-    position: absolute;
-    top: var(--s-2);
-    right: var(--s-2);
-    background: var(--warning);
-    color: white;
-    padding: 2px var(--s-2);
-    border-radius: 999px;
-    font-size: var(--text-xs);
-    font-weight: 600;
-    z-index: 2;
-}
-
-/* Card Header */
-.order-card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--s-3);
-    background: var(--gray-50);
-    border-bottom: 1px solid var(--gray-200);
-}
-
-.order-id {
-    font-size: var(--text-base);
-    font-weight: 700;
-    color: var(--gray-900);
-}
-
-.order-id span {
-    color: var(--primary);
-}
-
-.order-date {
-    font-size: var(--text-sm);
-    color: var(--gray-500);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-/* Card Body */
-.order-card-body {
-    padding: var(--s-4);
-}
-
-.order-info {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: var(--s-3);
-    margin-bottom: var(--s-4);
-}
-
-.order-info-item {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.order-info-item.full {
-    grid-column: 1 / -1;
-}
-
-.order-label {
-    font-size: var(--text-xs);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--gray-500);
-}
-
-.order-value {
-    font-size: var(--text-base);
-    font-weight: 600;
-    color: var(--gray-900);
-}
-
-.order-total {
-    font-size: var(--text-xl);
-    font-weight: 700;
-    color: var(--success);
-}
-
-.order-value.muted {
-    color: var(--gray-400);
-}
-
-/* Status Badge */
-.order-status {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px var(--s-2);
-    border-radius: 999px;
-    font-size: var(--text-sm);
-    font-weight: 600;
-}
-
-.status-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: currentColor;
-}
-
-.order-status.completed,
-.order-status.delivered {
-    background: var(--success-light);
-    color: #065f46;
-}
-
-.order-status.preparing {
-    background: var(--primary-light);
-    color: #1e40af;
-}
-
-.order-status.pending {
-    background: var(--warning-light);
-    color: #92400e;
-}
-
-.order-status.cancelled {
-    background: var(--error-light);
-    color: #991b1b;
-}
-
-/* Card Footer */
-.order-card-footer {
-    padding: var(--s-3);
-    background: var(--gray-50);
-    border-top: 1px solid var(--gray-100);
-    display: flex;
-    gap: var(--s-2);
-}
-
-.btn-details,
-.btn-invoice {
-    flex: 1;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    padding: 10px var(--s-2);
-    border-radius: var(--radius-lg);
-    font-size: var(--text-sm);
-    font-weight: 600;
-    text-decoration: none;
-    transition: all 0.15s;
-}
-
-.btn-details {
-    background: var(--primary);
-    color: white;
-}
-
-.btn-details:hover {
-    background: var(--primary-dark);
-    color: white;
-}
-
-.btn-invoice {
-    background: white;
-    color: var(--success);
-    border: 1px solid var(--success);
-}
-
-.btn-invoice:hover {
-    background: var(--success-light);
-    color: #065f46;
-}
-
-/* ============== EMPTY STATE - FULL SCREEN FIX ============== */
-.empty-state {
+.mo-tabs::-webkit-scrollbar { display: none; }
+.mo-tabs .sx-chip { flex-shrink: 0; }
+.mo-tabs .sx-chip span {
+    min-width: 20px;
+    padding: 0 6px;
+    border-radius: var(--sx-radius-pill);
+    background: var(--sx-surface-alt);
+    color: var(--sx-muted);
+    font-size: var(--sx-text-xs);
     text-align: center;
-    padding: var(--s-6) var(--s-3);
-    background: white;
-    border: 1px solid var(--gray-200);
-    border-radius: var(--radius-lg);
+}
+.mo-tabs .sx-chip.active span { background: rgba(255, 255, 255, 0.2); color: inherit; }
+
+/* Order card */
+.mo-list { display: grid; gap: var(--sx-space-4); }
+.mo-card { padding: 0; overflow: hidden; }
+.mo-card[hidden] { display: none; }
+.mo-card.has-update { box-shadow: inset 3px 0 0 var(--sx-status-pending), var(--sx-shadow-sm); }
+.mo-card-top {
     display: flex;
-    flex-direction: column;
+    flex-wrap: wrap;
     align-items: center;
-    justify-content: center;
-    min-height: 400px;
-    flex: 1;
+    justify-content: space-between;
+    gap: var(--sx-space-2) var(--sx-space-3);
+    padding: var(--sx-space-3) var(--sx-space-5);
+    border-bottom: 1px solid var(--sx-border-light);
 }
-
-.empty-icon {
-    font-size: 64px;
-    margin-bottom: var(--s-4);
-    opacity: 0.5;
+.mo-id { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sx-space-2); font-weight: var(--sx-weight-bold); color: var(--sx-dark); }
+.mo-id small { font-weight: var(--sx-weight-medium); color: var(--sx-muted); }
+.mo-tag {
+    padding: 2px 8px;
+    border-radius: var(--sx-radius-pill);
+    background: var(--sx-primary-soft);
+    color: var(--sx-primary);
+    font-size: var(--sx-text-xs);
+    font-weight: var(--sx-weight-bold);
 }
+.mo-tag.update { background: var(--sx-status-pending-bg); color: var(--sx-status-pending); }
 
-.empty-title {
-    font-size: var(--text-xl);
-    font-weight: 700;
-    color: var(--gray-900);
-    margin-bottom: var(--s-2);
+.mo-card-body {
+    display: grid;
+    gap: var(--sx-space-4);
+    padding: var(--sx-space-4) var(--sx-space-5);
 }
-
-.empty-text {
-    font-size: var(--text-base);
-    color: var(--gray-500);
-    margin-bottom: var(--s-4);
+.mo-items { display: flex; align-items: center; gap: var(--sx-space-3); min-width: 0; }
+.mo-thumbs { display: flex; flex-shrink: 0; }
+.mo-thumbs img,
+.mo-thumbs .more {
+    width: 56px;
+    height: 56px;
+    border: 2px solid var(--sx-surface);
+    border-radius: var(--sx-radius-md);
+    background: var(--sx-surface-alt);
+    object-fit: cover;
 }
-
-.empty-text a {
-    color: var(--primary);
-    font-weight: 600;
-    text-decoration: none;
+.mo-thumbs > * + * { margin-left: -14px; }
+.mo-thumbs .more {
+    display: grid;
+    place-items: center;
+    font-size: var(--sx-text-xs);
+    font-weight: var(--sx-weight-bold);
+    color: var(--sx-muted);
 }
-
-.empty-text a:hover {
-    text-decoration: underline;
+.mo-items-text { min-width: 0; }
+.mo-items-text strong {
+    display: block;
+    overflow: hidden;
+    color: var(--sx-dark);
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
+.mo-items-text span { font-size: var(--sx-text-sm); color: var(--sx-muted); }
 
-/* ============== RESPONSIVE ============== */
+.mo-meta { display: flex; flex-wrap: wrap; gap: var(--sx-space-2) var(--sx-space-5); font-size: var(--sx-text-sm); color: var(--sx-muted); }
+.mo-meta i { margin-right: 4px; }
+.mo-meta .ok { color: var(--sx-status-delivered); }
 
-/* Tablet */
+.mo-card-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sx-space-3);
+    padding: var(--sx-space-3) var(--sx-space-5);
+    background: var(--sx-surface-alt);
+}
+.mo-total { font-size: var(--sx-text-sm); color: var(--sx-muted); }
+.mo-total strong { margin-left: 4px; font-size: var(--sx-text-xl); font-weight: var(--sx-weight-extrabold); color: var(--sx-primary); }
+.mo-actions { display: flex; gap: var(--sx-space-2); }
+
+.mo-empty-tab[hidden] { display: none; }
+
 @media (min-width: 768px) {
-    .orders-grid {
-        grid-template-columns: repeat(2, 1fr);
-    }
-    
-    .empty-state {
-        min-height: 500px;
-    }
-    
-    .empty-icon {
-        font-size: 80px;
-    }
+    .mo-tabs { margin-inline: 0; padding-inline: 0; }
+    .mo-card-body { grid-template-columns: 1fr auto; align-items: center; }
+    .mo-meta { justify-content: flex-end; }
 }
-
-/* Desktop */
-@media (min-width: 1024px) {
-    .orders-grid {
-        grid-template-columns: repeat(3, 1fr);
-    }
-}
-
-/* Mobile */
-@media (max-width: 640px) {
-    .orders-container {
-        padding: var(--s-4) var(--s-2);
-    }
-    
-    .orders-header {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-    
-    .btn-shop {
-        width: 100%;
-        justify-content: center;
-    }
-    
-    .orders-title {
-        font-size: var(--text-xl);
-    }
-    
-    .order-card-header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: var(--s-1);
-    }
-    
-    .order-info {
-        grid-template-columns: 1fr;
-    }
-    
-    .order-card-body {
-        padding: var(--s-3);
-    }
-    
-    .order-total {
-        font-size: var(--text-lg);
-    }
-    
-    .empty-state {
-        min-height: 300px;
-    }
-    
-    .empty-icon {
-        font-size: 48px;
-    }
+@media (max-width: 575.98px) {
+    .mo-actions { width: 100%; }
+    .mo-actions .sx-btn { flex: 1; }
 }
 </style>
 
-<div class="orders-container">
-    <div class="orders-header">
-        <h1 class="orders-title">
-            <i class="bi bi-box-seam orders-icon"></i>
-            My Orders
-        </h1>
-        <a href="/sweepxpress/index.php" class="btn-shop">
-            <i class="bi bi-cart-plus"></i>
-            Continue Shopping
-        </a>
+<div class="mo sx-container">
+    <div class="mo-head">
+        <div>
+            <span class="sx-eyebrow">Account</span>
+            <h1 class="sx-heading-lg">My Orders</h1>
+            <p><?= number_format(count($orders)) ?> order<?= count($orders) === 1 ? '' : 's' ?> placed</p>
+        </div>
+        <a href="/sweepxpress/index.php" class="sx-btn sx-btn-ghost"><i class="fa-solid fa-store"></i> Continue shopping</a>
     </div>
 
-    <div class="stats-card">
-        <div class="stats-icon">
-            <i class="bi bi-clock-history"></i>
+    <?php if (!empty($loadError)): ?>
+        <div class="sx-alert sx-alert-error" role="alert">
+            <i class="fa-solid fa-circle-exclamation"></i><div>We couldn't load your orders right now. Please try again later.</div>
         </div>
-        <div class="stats-content">
-            <h2>Total Orders Placed</h2>
-            <span class="stats-value"><?= number_format(count($orders)) ?></span>
+    <?php elseif (($_GET['status'] ?? '') === 'not_found'): ?>
+        <div class="sx-alert sx-alert-warning" role="alert" style="margin-bottom: var(--sx-space-4)">
+            <i class="fa-solid fa-circle-exclamation"></i><div>That order could not be found.</div>
         </div>
-    </div>
+    <?php endif; ?>
 
     <?php if ($orders): ?>
-        <div class="orders-grid">
-            <?php foreach ($orders as $order): ?>
-                <?php 
-                    $has_notification = !empty(trim($order['admin_note'] ?? ''));
-                    $status_to_display = $order['status'] ?? 'pending'; 
-                    
-                    $statusBadgeClass = match($status_to_display) {
-                        'pending' => 'pending',
-                        'preparing' => 'preparing',
-                        'delivered' => 'delivered',
-                        'completed' => 'completed',
-                        'cancellation_requested', 'cancelled' => 'cancelled',
-                        default => 'pending'
-                    };
-                ?>
-                
-                <article class="order-card <?= $has_notification ? 'has-notification' : '' ?>">
-                    <!-- Card Header -->
-                    <div class="order-card-header">
-                        <div class="order-id">
-                            Order <span>#<?= h($order['id']) ?></span>
+        <nav class="mo-tabs" aria-label="Filter orders by status">
+            <?php foreach ($tabs as $key => $label): ?>
+                <button type="button" class="sx-chip<?= $key === 'all' ? ' active' : '' ?>" data-tab="<?= $key ?>"
+                        aria-pressed="<?= $key === 'all' ? 'true' : 'false' ?>">
+                    <?= $label ?> <span><?= $tabCounts[$key] ?></span>
+                </button>
+            <?php endforeach; ?>
+        </nav>
+
+        <div class="mo-list">
+            <?php foreach ($orders as $order):
+                $status = $order['status'] ?? 'pending';
+                [$statusLabel, $pillClass, $tab] = $statusMap[$status] ?? [ucfirst(str_replace('_', ' ', $status)), 'pending', 'pending'];
+                $items     = $itemsByOrder[$order['id']] ?? [];
+                $unitCount = array_sum(array_column($items, 'quantity'));
+                $hasUpdate = trim($order['admin_note'] ?? '') !== '';
+                $isPO      = $order['order_type'] === 'B2B' || $status === 'Pending PO';
+            ?>
+                <article class="sx-card mo-card<?= $hasUpdate ? ' has-update' : '' ?>" data-tab="<?= $tab ?>">
+                    <div class="mo-card-top">
+                        <div class="mo-id">
+                            Order #<?= (int)$order['id'] ?>
+                            <?php if ($isPO): ?><span class="mo-tag">Purchase order</span><?php endif; ?>
+                            <?php if ($hasUpdate): ?><span class="mo-tag update"><i class="fa-solid fa-bell"></i> New update</span><?php endif; ?>
+                            <small>· <?= date('M j, Y', strtotime($order['created_at'])) ?></small>
                         </div>
-                        <div class="order-date">
-                            <i class="bi bi-calendar3"></i>
-                            <?= date('M j, Y', strtotime($order['created_at'])) ?>
+                        <span class="sx-pill sx-pill-<?= $pillClass ?>"><?= h($statusLabel) ?></span>
+                    </div>
+
+                    <div class="mo-card-body">
+                        <div class="mo-items">
+                            <?php if ($items): ?>
+                                <div class="mo-thumbs" aria-hidden="true">
+                                    <?php foreach (array_slice($items, 0, 3) as $it): ?>
+                                        <img src="<?= h($it['image_path'] ?: '/sweepxpress/assets/placeholder.jpg') ?>" alt=""
+                                             loading="lazy" onerror="this.src='/sweepxpress/assets/placeholder.jpg'">
+                                    <?php endforeach; ?>
+                                    <?php if (count($items) > 3): ?><span class="more">+<?= count($items) - 3 ?></span><?php endif; ?>
+                                </div>
+                                <div class="mo-items-text">
+                                    <strong><?= h($items[0]['name'] ?? 'Item no longer available') ?></strong>
+                                    <span>
+                                        <?= count($items) > 1 ? '+ ' . (count($items) - 1) . ' more · ' : '' ?>
+                                        <?= $unitCount ?> unit<?= $unitCount === 1 ? '' : 's' ?>
+                                    </span>
+                                </div>
+                            <?php else: ?>
+                                <div class="mo-items-text"><span>No item details</span></div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="mo-meta">
+                            <span><i class="fa-solid fa-wallet"></i><?= h($order['payment_terms'] ?: $order['payment_method']) ?></span>
+                            <?php if (!empty($order['delivery_date'])): ?>
+                                <span class="ok"><i class="fa-solid fa-truck"></i>Delivery <?= date('M j, Y', strtotime($order['delivery_date'])) ?></span>
+                            <?php else: ?>
+                                <span><i class="fa-regular fa-calendar"></i>Delivery not yet scheduled</span>
+                            <?php endif; ?>
                         </div>
                     </div>
 
-                    <!-- Card Body -->
-                    <div class="order-card-body">
-                        <div class="order-info">
-                            <div class="order-info-item">
-                                <span class="order-label">Total Amount</span>
-                                <span class="order-value order-total">
-                                    ₱<?= number_format($order['total'], 2) ?>
-                                </span>
-                            </div>
-
-                            <div class="order-info-item">
-                                <span class="order-label">Status</span>
-                                <span class="order-status <?= $statusBadgeClass ?>">
-                                    <span class="status-dot"></span>
-                                    <?= h($status_to_display === 'shipped' ? 'Preparing' : ucfirst(str_replace('_', ' ', $status_to_display))) ?>
-                                </span>
-                            </div>
-
-                            <div class="order-info-item full">
-                                <span class="order-label">Delivery Date</span>
-                                <span class="order-value <?= empty($order['delivery_date']) ? 'muted' : '' ?>">
-                                    <?php if (!empty($order['delivery_date'])): ?>
-                                        <i class="bi bi-calendar-check" style="color: var(--success); margin-right: 4px;"></i>
-                                        <?= date('F j, Y', strtotime($order['delivery_date'])) ?>
-                                    <?php else: ?>
-                                        <i class="bi bi-calendar-x" style="margin-right: 4px;"></i>
-                                        Not yet scheduled
-                                    <?php endif; ?>
-                                </span>
-                            </div>
+                    <div class="mo-card-foot">
+                        <div class="mo-total">Order total <strong>₱<?= number_format((float)$order['total'], 2) ?></strong></div>
+                        <div class="mo-actions">
+                            <a href="/sweepxpress/Invoice.php?order_id=<?= (int)$order['id'] ?>" class="sx-btn sx-btn-ghost sx-btn-sm">
+                                <i class="fa-solid fa-file-invoice"></i> Invoice
+                            </a>
+                            <a href="/sweepxpress/customers/order_details.php?id=<?= (int)$order['id'] ?>" class="sx-btn sx-btn-primary sx-btn-sm">
+                                View details
+                            </a>
                         </div>
-                    </div>
-
-                    <!-- Card Footer -->
-                    <div class="order-card-footer">
-                        <a href="/sweepxpress/customers/order_details.php?id=<?= h($order['id']) ?>" class="btn-details">
-                            <i class="bi bi-eye"></i>
-                            Details
-                        </a>
-                        <a href="/sweepxpress/Invoice.php?order_id=<?= h($order['id']) ?>" class="btn-invoice">
-                            <i class="bi bi-receipt"></i>
-                            Invoice
-                        </a>
                     </div>
                 </article>
             <?php endforeach; ?>
+
+            <div class="sx-card sx-empty mo-empty-tab" hidden>
+                <i class="fa-solid fa-box-open"></i>
+                <h3>No orders here</h3>
+                <p>Orders with this status will show up here.</p>
+            </div>
         </div>
-        
-    <?php else: ?>
-        <div class="empty-state">
-            <div class="empty-icon">📦</div>
-            <h3 class="empty-title">No Orders Yet</h3>
-            <p class="empty-text">You haven't placed any orders yet. <a href="/sweepxpress/index.php">Start shopping now!</a></p>
+
+        <script>
+        // Status tabs — client-side lang, walang reload
+        document.addEventListener('DOMContentLoaded', function () {
+            const chips = document.querySelectorAll('.mo-tabs .sx-chip');
+            const cards = document.querySelectorAll('.mo-card');
+            const empty = document.querySelector('.mo-empty-tab');
+
+            chips.forEach((chip) => chip.addEventListener('click', function () {
+                const tab = this.dataset.tab;
+                let shown = 0;
+                chips.forEach((c) => {
+                    c.classList.toggle('active', c === this);
+                    c.setAttribute('aria-pressed', c === this ? 'true' : 'false');
+                });
+                cards.forEach((card) => {
+                    const match = tab === 'all' || card.dataset.tab === tab;
+                    card.hidden = !match;
+                    if (match) shown++;
+                });
+                empty.hidden = shown > 0;
+            }));
+        });
+        </script>
+    <?php elseif (empty($loadError)): ?>
+        <div class="sx-card sx-empty">
+            <i class="fa-solid fa-box-open"></i>
+            <h3>No orders yet</h3>
+            <p>When you place an order, you can follow it here.</p>
+            <a href="/sweepxpress/index.php" class="sx-btn sx-btn-primary sx-btn-arrow" style="margin-top: var(--sx-space-4)">
+                Start shopping <span class="sx-btn-icon"><i class="fa-solid fa-arrow-right"></i></span>
+            </a>
         </div>
     <?php endif; ?>
 </div>

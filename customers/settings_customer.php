@@ -1,21 +1,18 @@
 <?php
-// /customer/settings_customer.php
+// customers/settings_customer.php — profile at password ng customer / business account
 
-session_start();
+if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/../config.php';
-require_once __DIR__ . '/../includes/header.php'; 
 
-// Redirect if not logged in
-if (!isset($_SESSION['user']) || !isset($_SESSION['user']['id'])) {
+// Redirect bago ang header (dati pagkatapos, kaya hindi gumagana)
+$userId = $_SESSION['user']['id'] ?? null;
+if (!$userId) {
     header('Location: /sweepxpress/login.php');
     exit;
 }
 
-$userId = $_SESSION['user']['id'] ?? null;
-if (!$userId) {
-    header("Location: /sweepxpress/login.php");
-    exit;
-}
+if (empty($_SESSION['csrf_token'])) $_SESSION['csrf_token'] = bin2hex(random_bytes(24));
+$csrf_token = $_SESSION['csrf_token'];
 
 // Fetch user data
 $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
@@ -27,1123 +24,411 @@ if (!$dbUser) {
 }
 
 // Update session
-$_SESSION['user'] = array_merge([
-    'id' => '',
-    'username' => '',
-    'name' => '',
-    'email' => '',
-    'phone' => '',
-    'gender' => '',
-    'birthdate' => '',
-    'profile_image' => '/sweepxpress/uploads/profiles/default-avatar.png',
-    'streetaddress' => '',
-    'city' => '',
-    'zipcode' => ''
-], $dbUser);
-
+$_SESSION['user'] = array_merge($_SESSION['user'], $dbUser);
 $user = $_SESSION['user'];
 
-// Update profile
-if (isset($_POST['update_profile'])) {
-    $username = trim($_POST['username']);
-    $name = trim($_POST['name']);
-    $phone = trim($_POST['phone']);
-    $gender = $_POST['gender'];
-    $birthdate = $_POST['birthdate'];
-    $streetAddress = trim($_POST['streetaddress']);
-    $city = trim($_POST['city']);
-    $zipCode = trim($_POST['zipcode']);
+$tab    = ($_GET['tab'] ?? '') === 'security' ? 'security' : 'profile';
+$errors = [];   // mga mensahe ng validation para sa kasalukuyang form
+$old    = [];   // mga tinype ng user kapag may error, para hindi mawala
 
-    $profileImage = $user['profile_image'];
-    $validationError = false;
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!hash_equals($csrf_token, $_POST['csrf_token'] ?? '')) {
+        $errors[] = 'Your session expired. Please try again.';
+    }
 
-    // SERVER-SIDE VALIDATION FIXES
-    // Phone: Philippine format 09 followed by 9 digits (total 11 digits)
-    if ($phone !== '') {
-        if (!preg_match('/^09\d{9}$/', $phone)) {
-            echo "<script>
-                const toast = document.createElement('div');
-                toast.className = 'error-toast';
-                toast.innerHTML = '<i class=\"bi bi-exclamation-circle-fill\"></i> Phone must be 11 digits starting with 09 (e.g., 09564321020)';
-                document.body.appendChild(toast);
-                setTimeout(() => toast.classList.add('show'), 100);
-                setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 4000);
-            </script>";
-            $validationError = true;
+    // ---------------- Update profile ----------------
+    if (isset($_POST['update_profile'])) {
+        $tab = 'profile';
+        $old = $_POST;
+        $username      = trim($_POST['username'] ?? '');
+        $name          = trim($_POST['name'] ?? '');
+        $phone         = trim($_POST['phone'] ?? '');
+        $gender        = $_POST['gender'] ?? '';
+        $birthdate     = $_POST['birthdate'] ?? '';
+        $streetAddress = trim($_POST['streetaddress'] ?? '');
+        $city          = trim($_POST['city'] ?? '');
+        $zipCode       = trim($_POST['zipcode'] ?? '');
+        $profileImage  = $user['profile_image'];
+
+        if ($name === '') $errors[] = 'Full name is required.';
+        // Phone: Philippine format 09 followed by 9 digits (total 11 digits)
+        if ($phone !== '' && !preg_match('/^09\d{9}$/', $phone)) {
+            $errors[] = 'Phone must be 11 digits starting with 09 (e.g., 09564321020).';
         }
-    }
+        if ($zipCode !== '' && !preg_match('/^\d{4}$/', $zipCode)) {
+            $errors[] = 'Zip code must be 4 digits.';
+        }
+        if (!in_array($gender, ['', 'Male', 'Female', 'Other'], true)) {
+            $errors[] = 'Please choose a valid gender.';
+        }
+        if ($birthdate !== '') {
+            $d = DateTime::createFromFormat('Y-m-d', $birthdate);
+            if (!$d || $d->format('Y-m-d') !== $birthdate) {
+                $errors[] = 'Please enter a valid birthdate.';
+            } elseif ($d > new DateTime('today')) {
+                $errors[] = 'Birthdate cannot be in the future.';
+            }
+        }
 
-    // Zip code: digits only
-    if ($zipCode !== '' && !preg_match('/^\d+$/', $zipCode)) {
-        echo "<script>
-            const toast = document.createElement('div');
-            toast.className = 'error-toast';
-            toast.innerHTML = '<i class=\"bi bi-exclamation-circle-fill\"></i> Invalid zip code';
-            document.body.appendChild(toast);
-            setTimeout(() => toast.classList.add('show'), 100);
-            setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3000);
-        </script>";
-        $validationError = true;
-    }
-
-    // Birthdate: cannot be in the future
-    if (!empty($birthdate) && strtotime($birthdate) > strtotime('today')) {
-        echo "<script>
-            const toast = document.createElement('div');
-            toast.className = 'error-toast';
-            toast.innerHTML = '<i class=\"bi bi-exclamation-circle-fill\"></i> Birthdate cannot be in the future';
-            document.body.appendChild(toast);
-            setTimeout(() => toast.classList.add('show'), 100);
-            setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3000);
-        </script>";
-        $validationError = true;
-    }
-
-    // Username: hindi puwedeng blangko o kapareho ng ibang user
-    // (gumagana kahit wala pang UNIQUE index sa DB; ang index ang huling proteksyon)
-    if (!$validationError) {
-        $usernameError = '';
+        // Username: hindi puwedeng blangko o kapareho ng ibang user
+        // (gumagana kahit wala pang UNIQUE index sa DB; ang index ang huling proteksyon)
         if ($username === '') {
-            $usernameError = 'Username is required';
+            $errors[] = 'Username is required.';
         } else {
             $dup = $pdo->prepare("SELECT 1 FROM users WHERE username = ? AND id <> ? LIMIT 1");
             $dup->execute([$username, $userId]);
-            if ($dup->fetch()) {
-                $usernameError = 'Username is already taken';
-            }
+            if ($dup->fetch()) $errors[] = 'Username is already taken.';
         }
 
-        if ($usernameError !== '') {
-            echo "<script>
-                const toast = document.createElement('div');
-                toast.className = 'error-toast';
-                toast.innerHTML = '<i class=\"bi bi-exclamation-circle-fill\"></i> {$usernameError}';
-                document.body.appendChild(toast);
-                setTimeout(() => toast.classList.add('show'), 100);
-                setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3000);
-            </script>";
-            $validationError = true;
-        }
-    }
+        // Profile photo: JPG/PNG, hanggang 2 MB, at dapat totoong larawan
+        if (!$errors && !empty($_FILES['profile_image']['name'])) {
+            $file = $_FILES['profile_image'];
+            $info = $file['error'] === UPLOAD_ERR_OK ? @getimagesize($file['tmp_name']) : false;
+            $types = [IMAGETYPE_JPEG => 'jpg', IMAGETYPE_PNG => 'png'];
 
-    // Handle profile image upload
-    if (!$validationError && !empty($_FILES['profile_image']['name'])) {
-        $uploadDir = __DIR__ . '/../uploads/profiles/';
-        if (!is_dir($uploadDir)) {
-            mkdir($uploadDir, 0777, true);
-        }
-
-        $originalFilename = basename($_FILES['profile_image']['name']);
-        $extension = strtolower(pathinfo($originalFilename, PATHINFO_EXTENSION));
-        $allowed = ['jpg', 'jpeg', 'png'];
-
-        if (in_array($extension, $allowed)) {
-            $newFile = time() . '_' . md5(uniqid()) . '.' . $extension;
-            $uploadFile = $uploadDir . $newFile;
-
-            if (move_uploaded_file($_FILES['profile_image']['tmp_name'], $uploadFile)) {
-                $profileImage = "/sweepxpress/uploads/profiles/" . $newFile;
-            }
-        }
-    }
-
-    // Only update if no validation errors
-    if (!$validationError) {
-        $sql = "UPDATE users SET username = ?, name = ?, phone = ?, gender = ?, birthdate = ?, profile_image = ?, streetaddress = ?, city = ?, zipcode = ? WHERE id = ?";
-        $params = [$username, $name, $phone, $gender, $birthdate, $profileImage, $streetAddress, $city, $zipCode, $userId];
-
-        try {
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute($params);
-
-            $newData = $pdo->prepare("SELECT * FROM users WHERE id = ?");
-            $newData->execute([$userId]);
-            $_SESSION['user'] = array_merge($_SESSION['user'], $newData->fetch(PDO::FETCH_ASSOC));
-            $user = $_SESSION['user'];
-
-            echo "<script>
-                const toast = document.createElement('div');
-                toast.className = 'success-toast';
-                toast.innerHTML = '<i class=\"bi bi-check-circle-fill\"></i> Profile updated successfully!';
-                document.body.appendChild(toast);
-                setTimeout(() => toast.classList.add('show'), 100);
-                setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3000);
-                setTimeout(() => window.location.href='settings_customer.php?tab=general', 1500);
-            </script>";
-        } catch (PDOException $e) {
-            if (str_contains($e->getMessage(), 'Duplicate entry')) {
-                echo "<script>
-                    const toast = document.createElement('div');
-                    toast.className = 'error-toast';
-                    toast.innerHTML = '<i class=\"bi bi-exclamation-circle-fill\"></i> Username is already taken';
-                    document.body.appendChild(toast);
-                    setTimeout(() => toast.classList.add('show'), 100);
-                    setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3000);
-                </script>";
+            if ($file['error'] !== UPLOAD_ERR_OK || $file['size'] > 2 * 1024 * 1024) {
+                $errors[] = 'Photo must be 2 MB or smaller.';
+            } elseif (!$info || !isset($types[$info[2]])) {
+                $errors[] = 'Photo must be a JPG or PNG image.';
             } else {
-                error_log("Profile update failed for user {$userId}: " . $e->getMessage());
-                echo "<script>
-                    const toast = document.createElement('div');
-                    toast.className = 'error-toast';
-                    toast.innerHTML = '<i class=\"bi bi-exclamation-circle-fill\"></i> Could not save your profile. Please try again.';
-                    document.body.appendChild(toast);
-                    setTimeout(() => toast.classList.add('show'), 100);
-                    setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3000);
-                </script>";
+                $uploadDir = __DIR__ . '/../uploads/profiles/';
+                if (!is_dir($uploadDir)) {
+                    mkdir($uploadDir, 0755, true);
+                }
+                $newFile = time() . '_' . md5(uniqid('', true)) . '.' . $types[$info[2]];
+                if (move_uploaded_file($file['tmp_name'], $uploadDir . $newFile)) {
+                    $profileImage = "/sweepxpress/uploads/profiles/" . $newFile;
+                } else {
+                    $errors[] = 'Could not upload your photo. Please try again.';
+                }
             }
+        }
+
+        if (!$errors) {
+            try {
+                $pdo->prepare("
+                    UPDATE users
+                    SET username = ?, name = ?, phone = ?, gender = ?, birthdate = ?, profile_image = ?, streetaddress = ?, city = ?, zipcode = ?
+                    WHERE id = ?
+                ")->execute([
+                    $username, $name, $phone ?: null, $gender ?: null, $birthdate ?: null, $profileImage,
+                    $streetAddress ?: null, $city ?: null, $zipCode ?: null, $userId,
+                ]);
+
+                $_SESSION['sx_flash'] = ['success', 'Profile updated.'];
+                header('Location: /sweepxpress/customers/settings_customer.php');
+                exit;
+            } catch (PDOException $e) {
+                if (str_contains($e->getMessage(), 'Duplicate entry')) {
+                    $errors[] = 'Username is already taken.';
+                } else {
+                    error_log("Profile update failed for user {$userId}: " . $e->getMessage());
+                    $errors[] = 'Could not save your profile. Please try again.';
+                }
+            }
+        }
+    }
+
+    // ---------------- Change password ----------------
+    if (isset($_POST['change_password'])) {
+        $tab = 'security';
+        $current = $_POST['current_password'] ?? '';
+        $newpass = $_POST['new_password'] ?? '';
+        $confirm = $_POST['confirm_password'] ?? '';
+
+        if (!$errors) {
+            if (!password_verify($current, $dbUser['password_hash'] ?? '')) {
+                $errors[] = 'Incorrect current password.';
+            } elseif (!preg_match('/^(?=.*[A-Za-z])(?=.*\d)(?=.*[\W_]).{10,}$/', $newpass)) {
+                // Kapareho ng register.php / reset_password.php
+                $errors[] = 'New password needs 10+ characters with a letter, a number and a special character.';
+            } elseif ($newpass !== $confirm) {
+                $errors[] = 'Passwords do not match.';
+            } elseif (password_verify($newpass, $dbUser['password_hash'])) {
+                $errors[] = 'New password must be different from your current one.';
+            }
+        }
+
+        if (!$errors) {
+            $pdo->prepare("UPDATE users SET password_hash = ? WHERE id = ?")
+                ->execute([password_hash($newpass, PASSWORD_DEFAULT), $userId]);
+            $_SESSION['sx_flash'] = ['success', 'Password updated.'];
+            header('Location: /sweepxpress/customers/settings_customer.php?tab=security');
+            exit;
         }
     }
 }
 
-// Change password
-if (isset($_POST['change_password'])) {
-    $current = $_POST['current_password'] ?? '';
-    $newpass = $_POST['new_password'] ?? '';
-    $confirm = $_POST['confirm_password'] ?? '';
+$flash = $_SESSION['sx_flash'] ?? null;
+unset($_SESSION['sx_flash']);
 
-    if (!password_verify($current, $dbUser['password_hash'] ?? '')) {
-        echo "<script>
-            const toast = document.createElement('div');
-            toast.className = 'error-toast';
-            toast.innerHTML = '<i class=\"bi bi-exclamation-circle-fill\"></i> Incorrect current password';
-            document.body.appendChild(toast);
-            setTimeout(() => toast.classList.add('show'), 100);
-            setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3000);
-        </script>";
-    } elseif ($newpass !== $confirm) {
-        echo "<script>
-            const toast = document.createElement('div');
-            toast.className = 'error-toast';
-            toast.innerHTML = '<i class=\"bi bi-exclamation-circle-fill\"></i> Passwords do not match';
-            document.body.appendChild(toast);
-            setTimeout(() => toast.classList.add('show'), 100);
-            setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3000);
-        </script>";
-    } else {
-        $hash = password_hash($newpass, PASSWORD_DEFAULT);
-        $stmt = $pdo->prepare("UPDATE users SET password_hash=? WHERE id=?");
-        $stmt->execute([$hash, $userId]);
-        echo "<script>
-            const toast = document.createElement('div');
-            toast.className = 'success-toast';
-            toast.innerHTML = '<i class=\"bi bi-check-circle-fill\"></i> Password updated successfully!';
-            document.body.appendChild(toast);
-            setTimeout(() => toast.classList.add('show'), 100);
-            setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3000);
-            setTimeout(() => window.location.href='settings_customer.php?tab=general', 1500);
-        </script>";
-    }
-}
+// Halaga ng field: tinype ng user (kapag may error) o galing sa DB
+$val = fn(string $key) => h($old[$key] ?? ($user[$key] ?? ''));
 
-$displayImagePath = htmlspecialchars($user['profile_image'] ?? '/sweepxpress/assets/default-avatar.png');
-if (!empty($user['profile_image'])) {
-    $displayImagePath .= '?' . time();
-}
+$avatar = !empty($user['profile_image'])
+    ? $user['profile_image'] . '?' . time()
+    : '/sweepxpress/assets/profile-icon.jpg';
+$roleLabel = ['business' => 'Business account', 'admin' => 'Administrator'][$user['role']] ?? 'Customer';
 
-$tab = $_GET['tab'] ?? 'general';
+require_once __DIR__ . '/../includes/header.php';
 ?>
 
 <style>
-/* ============================================
-   2025 ENTERPRISE SETTINGS UI - SWEEPXPRESS
-   Mobile-First | Trust-Focused | Pixel Perfect
-   ============================================ */
+/* ============================================================
+   SETTINGS (Phase 9d) — tokens + sx-field / sx-pass / sx-rules mula sa assets/style.css
+   ============================================================ */
+.st { max-width: 1100px; padding-block: var(--sx-space-5) var(--sx-space-8); }
+.st-head { margin-bottom: var(--sx-space-5); }
+.st-head p { margin: var(--sx-space-2) 0 0; color: var(--sx-muted); }
+.st-layout { display: grid; gap: var(--sx-space-5); align-items: start; }
 
-:root {
-    /* Brand Colors - Trust & Professional */
-    --primary-600: #2563eb;
-    --primary-700: #1d4ed8;
-    --primary-50: #eff6ff;
-    --primary-100: #dbeafe;
-    
-    --success-600: #059669;
-    --success-50: #ecfdf5;
-    
-    --error-600: #dc2626;
-    --error-50: #fef2f2;
-    
-    /* Neutrals - Modern Palette */
-    --gray-50: #f9fafb;
-    --gray-100: #f3f4f6;
-    --gray-200: #e5e7eb;
-    --gray-300: #d1d5db;
-    --gray-400: #9ca3af;
-    --gray-500: #6b7280;
-    --gray-600: #4b5563;
-    --gray-700: #374151;
-    --gray-800: #1f2937;
-    --gray-900: #111827;
-    
-    /* Semantic Colors */
-    --bg-page: #f8fafc;
-    --bg-card: #ffffff;
-    --text-primary: #0f172a;
-    --text-secondary: #475569;
-    --text-muted: #64748b;
-    --border-color: #e2e8f0;
-    
-    /* Typography - Fluid Scaling */
-    --text-xs: clamp(0.75rem, 0.7rem + 0.2vw, 0.8125rem);
-    --text-sm: clamp(0.875rem, 0.85rem + 0.125vw, 0.9375rem);
-    --text-base: clamp(1rem, 0.975rem + 0.125vw, 1.0625rem);
-    --text-lg: clamp(1.125rem, 1.075rem + 0.25vw, 1.25rem);
-    --text-xl: clamp(1.25rem, 1.175rem + 0.375vw, 1.5rem);
-    --text-2xl: clamp(1.5rem, 1.375rem + 0.625vw, 1.875rem);
-    
-    /* Spacing - 4px Base Grid */
-    --space-1: 0.25rem;
-    --space-2: 0.5rem;
-    --space-3: 0.75rem;
-    --space-4: 1rem;
-    --space-5: 1.25rem;
-    --space-6: 1.5rem;
-    --space-8: 2rem;
-    --space-10: 2.5rem;
-    --space-12: 3rem;
-    --space-16: 4rem;
-    
-    /* Border Radius */
-    --radius-sm: 0.5rem;
-    --radius-md: 0.75rem;
-    --radius-lg: 1rem;
-    --radius-xl: 1.5rem;
-    --radius-full: 9999px;
-    
-    /* Shadows - Layered Depth */
-    --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-    --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
-    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-    --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
-    
-    /* Transitions */
-    --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-base: 200ms cubic-bezier(0.4, 0, 0.2, 1);
-    
-    /* Font Stack */
-    --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-}
-
-/* Base Reset */
-*, *::before, *::after {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-}
-
-body {
-    font-family: var(--font-sans);
-    font-size: var(--text-base);
-    line-height: 1.6;
-    color: var(--text-primary);
-    background: linear-gradient(135deg, #f0f9ff 0%, #f8fafc 50%, #fafafa 100%);
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-}
-
-/* Main Container */
-.settings-page {
-    min-height: calc(100vh - 80px);
-    padding: var(--space-6) var(--space-4);
+/* Account card + tabs */
+.st-side { display: grid; gap: var(--sx-space-4); }
+.st-account { display: flex; align-items: center; gap: var(--sx-space-3); }
+.st-account img { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; background: var(--sx-surface-alt); }
+.st-account strong { display: block; color: var(--sx-dark); }
+.st-account span { font-size: var(--sx-text-sm); color: var(--sx-muted); overflow-wrap: anywhere; }
+.st-nav { display: flex; gap: var(--sx-space-2); }
+.st-nav a {
     display: flex;
-    justify-content: center;
-    align-items: flex-start;
-}
-
-.settings-wrapper {
-    width: 100%;
-    max-width: 75rem;
-    background: var(--bg-card);
-    border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-xl);
-    border: 1px solid var(--border-color);
-    overflow: hidden;
-    display: flex;
-    min-height: calc(100vh - 200px);
-}
-
-/* Sidebar Navigation */
-.settings-sidebar {
-    width: 17rem;
-    background: linear-gradient(180deg, var(--gray-50) 0%, var(--primary-50) 100%);
-    border-right: 1px solid var(--border-color);
-    padding: var(--space-8) var(--space-6);
-    flex-shrink: 0;
-}
-
-.settings-sidebar h2 {
-    font-size: var(--text-xs);
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-    margin-bottom: var(--space-6);
-}
-
-.settings-nav-link {
-    display: flex;
+    flex: 1;
     align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--space-4);
-    margin-bottom: var(--space-2);
-    border-radius: var(--radius-md);
+    gap: var(--sx-space-2);
+    padding: 10px var(--sx-space-4);
+    border-radius: var(--sx-radius-md);
+    font-weight: var(--sx-weight-semibold);
+    color: var(--sx-muted);
     text-decoration: none;
-    color: var(--text-primary);
-    font-weight: 500;
-    font-size: var(--text-sm);
-    transition: all var(--transition-fast);
-    position: relative;
 }
+.st-nav a:hover { background: var(--sx-surface-alt); color: var(--sx-dark); }
+.st-nav a.active { background: var(--sx-primary-soft); color: var(--sx-primary); }
+.st-links { display: grid; gap: var(--sx-space-1); padding-top: var(--sx-space-3); border-top: 1px solid var(--sx-border-light); }
+.st-links a { font-size: var(--sx-text-sm); color: var(--sx-muted); text-decoration: none; }
+.st-links a:hover { color: var(--sx-primary); }
+.st-links i { width: 20px; }
 
-.settings-nav-link::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 3px;
-    height: 0;
-    background: var(--primary-600);
-    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-    transition: height var(--transition-fast);
+/* Form card */
+.st-card h2 { margin: 0 0 4px; font-size: var(--sx-text-xl); font-weight: var(--sx-weight-extrabold); color: var(--sx-dark); }
+.st-card > p { margin: 0 0 var(--sx-space-5); color: var(--sx-muted); font-size: var(--sx-text-sm); }
+.st-section { margin: var(--sx-space-5) 0 var(--sx-space-3); padding-top: var(--sx-space-4); border-top: 1px solid var(--sx-border-light); font-size: var(--sx-text-xs); font-weight: var(--sx-weight-bold); letter-spacing: 0.04em; text-transform: uppercase; color: var(--sx-muted); }
+.st-grid { display: grid; gap: 0 var(--sx-space-4); }
+.st-photo { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sx-space-4); margin-bottom: var(--sx-space-4); }
+.st-photo img { width: 88px; height: 88px; border-radius: 50%; object-fit: cover; background: var(--sx-surface-alt); box-shadow: 0 0 0 4px var(--sx-surface), 0 0 0 5px var(--sx-border-light); }
+.st-photo input { display: none; }
+.st-photo .sx-hint { display: block; margin-top: 6px; }
+.st-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sx-space-2); margin-top: var(--sx-space-2); }
+.st-readonly { display: flex; align-items: center; gap: var(--sx-space-2); }
+.st-readonly .sx-input { background: var(--sx-surface-alt); color: var(--sx-muted); }
+
+@media (min-width: 640px) {
+    .st-grid { grid-template-columns: 1fr 1fr; }
+    .st-grid .full { grid-column: 1 / -1; }
 }
-
-.settings-nav-link:hover {
-    background: var(--gray-100);
-    transform: translateX(4px);
-}
-
-.settings-nav-link:hover::before {
-    height: 1.5rem;
-}
-
-.settings-nav-link.active {
-    background: linear-gradient(135deg, var(--primary-600), #3b82f6);
-    color: white;
-    font-weight: 600;
-    box-shadow: var(--shadow-md);
-}
-
-.settings-nav-link.active::before {
-    height: 2rem;
-}
-
-.settings-nav-link.active i {
-    color: white;
-}
-
-.settings-nav-link i {
-    font-size: 1.125rem;
-    color: var(--text-secondary);
-    transition: color var(--transition-fast);
-}
-
-/* Content Area */
-.settings-content {
-    flex: 1;
-    padding: var(--space-8);
-    overflow-y: auto;
-}
-
-/* Profile Header Card */
-.profile-header-strip {
-    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-    border-radius: var(--radius-lg);
-    padding: var(--space-8);
-    display: flex;
-    align-items: center;
-    gap: var(--space-6);
-    margin-bottom: var(--space-8);
-    box-shadow: var(--shadow-md);
-    border: 1px solid var(--border-color);
-    position: relative;
-    overflow: hidden;
-}
-
-.profile-header-strip::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 4px;
-    background: linear-gradient(90deg, var(--primary-600), #3b82f6, #60a5fa);
-}
-
-.profile-header-strip img {
-    width: 5.5rem;
-    height: 5.5rem;
-    border-radius: var(--radius-full);
-    object-fit: cover;
-    border: 3px solid white;
-    box-shadow: var(--shadow-lg);
-    flex-shrink: 0;
-}
-
-.profile-header-strip > div {
-    flex: 1;
-    min-width: 0;
-}
-
-.profile-header-strip .fw-semibold {
-    font-size: var(--text-xl);
-    font-weight: 700;
-    color: var(--text-primary);
-    margin-bottom: var(--space-1);
-}
-
-.profile-header-strip .user-email {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    margin-bottom: var(--space-3);
-}
-
-.profile-header-strip .change-link {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    font-size: var(--text-sm);
-    font-weight: 600;
-    color: var(--primary-600);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    padding: var(--space-2) var(--space-4);
-    border-radius: var(--radius-full);
-    background: var(--primary-50);
-}
-
-.profile-header-strip .change-link:hover {
-    background: var(--primary-100);
-    transform: translateY(-1px);
-}
-
-/* Info Rows - Card Style */
-.info-row {
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
-    padding: var(--space-5) var(--space-6);
-    margin-bottom: var(--space-4);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: var(--space-4);
-    transition: all var(--transition-fast);
-}
-
-.info-row:hover {
-    box-shadow: var(--shadow-md);
-    transform: translateY(-2px);
-    border-color: var(--gray-300);
-}
-
-.info-row > div:first-child {
-    flex: 1;
-    min-width: 0;
-}
-
-.info-label {
-    font-size: var(--text-xs);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-muted);
-    margin-bottom: var(--space-2);
-}
-
-.info-value {
-    font-size: var(--text-base);
-    font-weight: 500;
-    color: var(--text-primary);
-    word-break: break-word;
-}
-
-.info-right {
-    flex-shrink: 0;
-}
-
-.info-right button {
-    font-size: var(--text-sm);
-    font-weight: 600;
-    padding: var(--space-2) var(--space-5);
-    border-radius: var(--radius-full);
-    border: 1px solid var(--primary-600);
-    color: var(--primary-600);
-    background: transparent;
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    min-height: 2.25rem;
-}
-
-.info-right button:hover {
-    background: linear-gradient(135deg, var(--primary-600), #3b82f6);
-    color: white;
-    box-shadow: var(--shadow-md);
-    transform: translateY(-1px);
-}
-
-.info-right .text-muted {
-    font-size: var(--text-sm);
-    color: var(--text-muted);
-}
-
-/* Modals */
-.settings-modal {
-    display: none;
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    background: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(4px);
-    justify-content: center;
-    align-items: center;
-    padding: var(--space-4);
-    overflow-y: auto;
-}
-
-.settings-modal-panel {
-    background: var(--bg-card);
-    width: 100%;
-    max-width: 40rem;
-    border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-xl);
-    border: 1px solid var(--border-color);
-    max-height: 90vh;
-    overflow-y: auto;
-}
-
-.settings-modal-panel h3 {
-    font-size: var(--text-xl);
-    font-weight: 700;
-    color: var(--text-primary);
-    padding: var(--space-6) var(--space-8);
-    border-bottom: 1px solid var(--border-color);
-    margin: 0;
-}
-
-.settings-modal-panel form {
-    padding: var(--space-8);
-}
-
-/* Profile Upload Section */
-.modal-profile-group {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: var(--space-6) 0 var(--space-8);
-    border-bottom: 1px solid var(--border-color);
-    margin-bottom: var(--space-6);
-}
-
-.modal-profile-group img {
-    width: 7rem;
-    height: 7rem;
-    border-radius: var(--radius-full);
-    object-fit: cover;
-    border: 3px solid var(--border-color);
-    margin-bottom: var(--space-4);
-    box-shadow: var(--shadow-md);
-}
-
-/* Form Elements */
-.form-group {
-    margin-bottom: var(--space-5);
-}
-
-.form-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: var(--space-5);
-}
-
-.form-grid .full-width {
-    grid-column: 1 / -1;
-}
-
-.settings-modal-panel label {
-    display: block;
-    font-size: var(--text-sm);
-    font-weight: 600;
-    color: var(--text-secondary);
-    margin-bottom: var(--space-2);
-}
-
-.settings-modal-panel input,
-.settings-modal-panel select {
-    width: 100%;
-    padding: var(--space-3) var(--space-4);
-    border-radius: var(--radius-md);
-    border: 1px solid var(--border-color);
-    font-size: var(--text-base);
-    background: var(--gray-50);
-    color: var(--text-primary);
-    transition: all var(--transition-fast);
-}
-
-.settings-modal-panel input:focus,
-.settings-modal-panel select:focus {
-    outline: none;
-    border-color: var(--primary-600);
-    box-shadow: 0 0 0 3px var(--primary-50);
-    background: white;
-}
-
-.settings-modal-panel input[type="file"] {
-    background: transparent;
-    border: 1px dashed var(--border-color);
-    padding: var(--space-4);
-    cursor: pointer;
-}
-
-.settings-modal-panel input[type="file"]:hover {
-    border-color: var(--primary-600);
-    background: var(--primary-50);
-}
-
-/* Modal Actions */
-.mt-4 {
-    margin-top: var(--space-6);
-    padding-top: var(--space-6);
-    border-top: 1px solid var(--border-color);
-}
-
-.btn-pill-primary {
-    background: linear-gradient(135deg, var(--primary-600), #3b82f6);
-    color: white;
-    border: none;
-    border-radius: var(--radius-full);
-    padding: var(--space-3) var(--space-8);
-    font-size: var(--text-base);
-    font-weight: 600;
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    box-shadow: var(--shadow-md);
-    min-height: 2.75rem;
-}
-
-.btn-pill-primary:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-lg);
-}
-
-.btn-pill-secondary {
-    background: transparent;
-    color: var(--text-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-full);
-    padding: var(--space-3) var(--space-6);
-    font-size: var(--text-base);
-    font-weight: 600;
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    margin-left: var(--space-3);
-    min-height: 2.75rem;
-}
-
-.btn-pill-secondary:hover {
-    background: var(--gray-100);
-    border-color: var(--gray-300);
-}
-
-/* Toast Notifications */
-.success-toast,
-.error-toast {
-    position: fixed;
-    top: var(--space-8);
-    right: var(--space-8);
-    padding: var(--space-4) var(--space-6);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-xl);
-    font-weight: 600;
-    font-size: var(--text-base);
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    z-index: 9999;
-    transform: translateX(calc(100% + var(--space-8)));
-    transition: transform var(--transition-base);
-}
-
-.success-toast {
-    background: var(--success-50);
-    color: var(--success-600);
-    border: 1px solid var(--success-600);
-}
-
-.error-toast {
-    background: var(--error-50);
-    color: var(--error-600);
-    border: 1px solid var(--error-600);
-}
-
-.success-toast.show,
-.error-toast.show {
-    transform: translateX(0);
-}
-
-/* Responsive Design */
-@media (max-width: 64rem) {
-    .settings-wrapper {
-        max-width: 100%;
-    }
-}
-
-@media (max-width: 56rem) {
-    .settings-wrapper {
-        flex-direction: column;
-    }
-    
-    .settings-sidebar {
-        width: 100%;
-        border-right: none;
-        border-bottom: 1px solid var(--border-color);
-        padding: var(--space-6);
-    }
-    
-    .settings-nav-link {
-        justify-content: center;
-    }
-    
-    .profile-header-strip {
-        flex-direction: column;
-        text-align: center;
-        padding: var(--space-6);
-    }
-    
-    .info-row {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: var(--space-3);
-    }
-    
-    .info-right {
-        width: 100%;
-    }
-    
-    .info-right button {
-        width: 100%;
-    }
-}
-
-@media (max-width: 40rem) {
-    .settings-page {
-        padding: var(--space-4) var(--space-2);
-    }
-    
-    .settings-content {
-        padding: var(--space-6) var(--space-4);
-    }
-    
-    .form-grid {
-        grid-template-columns: 1fr;
-    }
-    
-    .form-grid .full-width {
-        grid-column: 1;
-    }
-    
-    .profile-header-strip img {
-        width: 4.5rem;
-        height: 4.5rem;
-    }
-    
-    .success-toast,
-    .error-toast {
-        right: var(--space-4);
-        left: var(--space-4);
-        top: var(--space-4);
-    }
+@media (min-width: 992px) {
+    .st-layout { grid-template-columns: 280px 1fr; }
+    .st-side { position: sticky; top: calc(var(--sx-nav-h, 70px) + var(--sx-space-4)); }
+    .st-nav { flex-direction: column; }
 }
 </style>
 
-<div class="settings-page">
-    <div class="settings-wrapper">
-        <aside class="settings-sidebar">
-            <h2>Account Settings</h2>
-            <a href="?tab=general" class="settings-nav-link <?= $tab === 'general' ? 'active' : ''; ?>">
-                <i class="bi bi-person-gear"></i>
-                <span>General</span>
-            </a>
+<div class="st sx-container">
+    <div class="st-head">
+        <span class="sx-eyebrow">Account</span>
+        <h1 class="sx-heading-lg">Settings</h1>
+        <p>Manage your profile, delivery address and password.</p>
+    </div>
+
+    <div class="st-layout">
+        <aside class="sx-card st-side">
+            <div class="st-account">
+                <img src="<?= h($avatar) ?>" alt="" id="sideAvatar" onerror="this.src='/sweepxpress/assets/profile-icon.jpg'">
+                <div>
+                    <strong><?= h($user['name']) ?></strong>
+                    <span><?= h($roleLabel) ?> · since <?= date('M Y', strtotime($user['created_at'])) ?></span>
+                </div>
+            </div>
+            <nav class="st-nav" aria-label="Settings sections">
+                <a href="?tab=profile" class="<?= $tab === 'profile' ? 'active' : '' ?>"><i class="fa-solid fa-user"></i> Profile</a>
+                <a href="?tab=security" class="<?= $tab === 'security' ? 'active' : '' ?>"><i class="fa-solid fa-lock"></i> Password</a>
+            </nav>
+            <div class="st-links">
+                <a href="/sweepxpress/customers/my_orders.php"><i class="fa-solid fa-receipt"></i> My Orders</a>
+                <a href="/sweepxpress/cart.php"><i class="fa-solid fa-cart-shopping"></i> Cart</a>
+            </div>
         </aside>
 
-        <section class="settings-content">
-            <?php if ($tab === 'general'): ?>
-                <div class="profile-header-strip">
-                    <img src="<?= $displayImagePath; ?>" alt="Profile">
-                    <div>
-                        <div class="fw-semibold"><?= htmlspecialchars($user['name']); ?></div>
-                        <div class="user-email"><?= htmlspecialchars($user['email']); ?></div>
-                        <span class="change-link" onclick="openProfileModal()">
-                            <i class="bi bi-camera"></i>Edit Profile
-                        </span>
-                    </div>
-                </div>
-
-                <div class="info-row">
-                    <div>
-                        <div class="info-label">Username</div>
-                        <div class="info-value"><?= htmlspecialchars($user['username']); ?></div>
-                    </div>
-                    <div class="info-right">
-                        <button onclick="openProfileModal()">Edit</button>
-                    </div>
-                </div>
-
-                <div class="info-row">
-                    <div>
-                        <div class="info-label">Full Name</div>
-                        <div class="info-value"><?= htmlspecialchars($user['name']); ?></div>
-                    </div>
-                    <div class="info-right">
-                        <button onclick="openProfileModal()">Edit</button>
-                    </div>
-                </div>
-
-                <div class="info-row">
-                    <div>
-                        <div class="info-label">Email Address</div>
-                        <div class="info-value"><?= htmlspecialchars($user['email']); ?></div>
-                    </div>
-                    <div class="info-right">
-                        <span class="text-muted">Cannot be changed</span>
-                    </div>
-                </div>
-
-                <div class="info-row">
-                    <div>
-                        <div class="info-label">Phone Number</div>
-                        <div class="info-value">
-                            <?= htmlspecialchars($user['phone'] ?? 'No phone number saved'); ?>
-                        </div>
-                    </div>
-                    <div class="info-right">
-                        <button onclick="openProfileModal()">Edit</button>
-                    </div>
-                </div>
-                
-                <div class="info-row">
-                    <div>
-                        <div class="info-label">Address</div>
-                        <div class="info-value">
-                            <?php if (!empty($user['streetaddress']) || !empty($user['city']) || !empty($user['zipcode'])): ?>
-                                <?= htmlspecialchars($user['streetaddress'] ?? ''); ?><br>
-                                <?= htmlspecialchars($user['city'] ?? ''); ?> <?= htmlspecialchars($user['zipcode'] ?? ''); ?>
-                            <?php else: ?>
-                                No address saved
-                            <?php endif; ?>
-                        </div>
-                    </div>
-                    <div class="info-right">
-                        <button onclick="openProfileModal()">Edit</button>
-                    </div>
-                </div>
-                
-                <div class="info-row">
-                    <div>
-                        <div class="info-label">Personal Information</div>
-                        <div class="info-value">
-                            <?= htmlspecialchars($user['gender'] ?? 'Not specified'); ?> • 
-                            <?= $user['birthdate'] ? date('M d, Y', strtotime($user['birthdate'])) : 'Not specified' ?>
-                        </div>
-                    </div>
-                    <div class="info-right">
-                        <button onclick="openProfileModal()">Edit</button>
-                    </div>
-                </div>
-
-                <div class="info-row">
-                    <div>
-                        <div class="info-label">Password</div>
-                        <div class="info-value">••••••••</div>
-                    </div>
-                    <div class="info-right">
-                        <button onclick="openPasswordModal()">Change</button>
-                    </div>
+        <div>
+            <?php if ($flash): ?>
+                <div class="sx-alert sx-alert-<?= h($flash[0]) ?>" role="status" style="margin-bottom: var(--sx-space-4)">
+                    <i class="fa-solid fa-circle-check"></i><div><?= h($flash[1]) ?></div>
                 </div>
             <?php endif; ?>
-        </section>
-    </div>
-</div>
+            <?php if ($errors): ?>
+                <div class="sx-alert sx-alert-error" role="alert" style="margin-bottom: var(--sx-space-4)">
+                    <i class="fa-solid fa-circle-exclamation"></i>
+                    <div><?= implode('<br>', array_map('h', $errors)) ?></div>
+                </div>
+            <?php endif; ?>
 
-<div id="profileModal" class="settings-modal">
-    <div class="settings-modal-panel">
-        <h3>Edit Profile</h3>
-        <form method="POST" enctype="multipart/form-data">
-            <input type="hidden" name="update_profile" value="1">
-            
-            <div class="modal-profile-group">
-                <img id="profileImagePreview" src="<?= $displayImagePath; ?>" alt="Profile">
-                <div class="form-group full-width">
-                    <label>Profile Photo</label>
-                    <input type="file" name="profile_image" id="profileImgInput" accept="image/*">
-                </div>
-            </div>
+            <?php if ($tab === 'profile'): ?>
+                <form method="POST" enctype="multipart/form-data" class="sx-card st-card">
+                    <input type="hidden" name="csrf_token" value="<?= h($csrf_token) ?>">
+                    <input type="hidden" name="update_profile" value="1">
+                    <h2>Profile</h2>
+                    <p>This is used on your orders and invoices.</p>
 
-            <div class="form-grid">
-                <div class="form-group full-width">
-                    <label>Username</label>
-                    <input type="text" name="username" value="<?= htmlspecialchars($user['username']); ?>" required>
-                </div>
-                
-                <div class="form-group full-width">
-                    <label>Full Name</label>
-                    <input type="text" name="name" value="<?= htmlspecialchars($user['name']); ?>" required>
-                </div>
+                    <div class="st-photo">
+                        <img src="<?= h($avatar) ?>" alt="" id="photoPreview" onerror="this.src='/sweepxpress/assets/profile-icon.jpg'">
+                        <div>
+                            <label for="profileImgInput" class="sx-btn sx-btn-outline sx-btn-sm"><i class="fa-solid fa-camera"></i> Change photo</label>
+                            <input type="file" name="profile_image" id="profileImgInput" accept="image/jpeg,image/png">
+                            <span class="sx-hint">JPG or PNG, up to 2 MB.</span>
+                        </div>
+                    </div>
 
-                <div class="form-group">
-                    <label>Phone Number (e.g., 09564321020)</label>
-                    <!-- CLIENT-SIDE: 11 digits, starts with 09 -->
-                    <input 
-                        type="tel" 
-                        name="phone" 
-                        value="<?= htmlspecialchars($user['phone'] ?? ''); ?>"
-                        placeholder="09XXXXXXXXX"
-                        maxlength="11"
-                        pattern="^09\d{9}$"
-                        title="Phone number must be 11 digits starting with 09"
-                        inputmode="numeric"
-                    >
-                </div>
-                
-                <div class="form-group">
-                    <label>Date of Birth</label>
-                    <!-- CLIENT-SIDE MAX TODAY -->
-                    <input 
-                        type="date" 
-                        name="birthdate" 
-                        id="birthdateInput"
-                        value="<?= htmlspecialchars($user['birthdate'] ?? ''); ?>">
-                </div>
-                
-                <div class="form-group full-width">
-                    <label>Gender</label>
-                    <select name="gender" required>
-                        <option value="Male" <?= ($user['gender'] === 'Male' ? 'selected' : ''); ?>>Male</option>
-                        <option value="Female" <?= ($user['gender'] === 'Female' ? 'selected' : ''); ?>>Female</option>
-                        <option value="Other" <?= ($user['gender'] === 'Other' ? 'selected' : ''); ?>>Other</option>
-                    </select>
-                </div>
+                    <div class="st-grid">
+                        <div class="sx-field">
+                            <label class="sx-label" for="username">Username</label>
+                            <input type="text" id="username" name="username" class="sx-input" value="<?= $val('username') ?>" required maxlength="50" autocomplete="username">
+                        </div>
+                        <div class="sx-field">
+                            <label class="sx-label" for="name">Full name</label>
+                            <input type="text" id="name" name="name" class="sx-input" value="<?= $val('name') ?>" required maxlength="120" autocomplete="name">
+                        </div>
+                        <div class="sx-field full">
+                            <label class="sx-label" for="email">Email</label>
+                            <div class="st-readonly">
+                                <input type="email" id="email" class="sx-input" value="<?= h($user['email']) ?>" readonly aria-describedby="emailHint">
+                            </div>
+                            <span class="sx-hint" id="emailHint">Your email can't be changed.</span>
+                        </div>
+                        <div class="sx-field">
+                            <label class="sx-label" for="phone">Phone <span class="sx-hint">(optional)</span></label>
+                            <input type="tel" id="phone" name="phone" class="sx-input" value="<?= $val('phone') ?>"
+                                   placeholder="09XXXXXXXXX" maxlength="11" pattern="09\d{9}" inputmode="numeric"
+                                   title="11 digits starting with 09" autocomplete="tel">
+                        </div>
+                        <div class="sx-field">
+                            <label class="sx-label" for="birthdateInput">Birthdate <span class="sx-hint">(optional)</span></label>
+                            <input type="date" id="birthdateInput" name="birthdate" class="sx-input" value="<?= $val('birthdate') ?>" max="<?= date('Y-m-d') ?>">
+                        </div>
+                        <div class="sx-field">
+                            <label class="sx-label" for="gender">Gender <span class="sx-hint">(optional)</span></label>
+                            <?php $g = $old['gender'] ?? ($user['gender'] ?? ''); ?>
+                            <select id="gender" name="gender" class="sx-select">
+                                <option value="">Prefer not to say</option>
+                                <?php foreach (['Male', 'Female', 'Other'] as $opt): ?>
+                                    <option value="<?= $opt ?>" <?= $g === $opt ? 'selected' : '' ?>><?= $opt ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </div>
 
-                <div class="form-group full-width">
-                    <label>Street Address</label>
-                    <input type="text" name="streetaddress" value="<?= htmlspecialchars($user['streetaddress'] ?? ''); ?>">
-                </div>
-                
-                <div class="form-group">
-                    <label>City</label>
-                    <input type="text" name="city" value="<?= htmlspecialchars($user['city'] ?? ''); ?>">
-                </div>
-                
-                <div class="form-group">
-                    <label>Zip Code</label>
-                    <!-- ZIP: DIGITS ONLY -->
-                    <input 
-                        type="text" 
-                        name="zipcode" 
-                        value="<?= htmlspecialchars($user['zipcode'] ?? ''); ?>"
-                        inputmode="numeric"
-                        pattern="\d*"
-                    >
-                </div>
-            </div>
+                    <div class="st-section">Delivery address</div>
+                    <div class="st-grid">
+                        <div class="sx-field full">
+                            <label class="sx-label" for="streetaddress">Street address</label>
+                            <input type="text" id="streetaddress" name="streetaddress" class="sx-input" value="<?= $val('streetaddress') ?>"
+                                   maxlength="255" placeholder="House no., street, barangay" autocomplete="street-address">
+                        </div>
+                        <div class="sx-field">
+                            <label class="sx-label" for="city">City</label>
+                            <input type="text" id="city" name="city" class="sx-input" value="<?= $val('city') ?>" maxlength="100" autocomplete="address-level2">
+                        </div>
+                        <div class="sx-field">
+                            <label class="sx-label" for="zipcode">Zip code</label>
+                            <input type="text" id="zipcode" name="zipcode" class="sx-input" value="<?= $val('zipcode') ?>"
+                                   maxlength="4" pattern="\d{4}" inputmode="numeric" title="4 digits" autocomplete="postal-code">
+                        </div>
+                    </div>
 
-            <div class="mt-4 d-flex justify-content-end">
-                <button type="submit" class="btn-pill-primary">Save Changes</button>
-                <button type="button" class="btn-pill-secondary" onclick="closeProfileModal()">Cancel</button>
-            </div>
-        </form>
-    </div>
-</div>
+                    <div class="st-actions">
+                        <a href="?tab=profile" class="sx-btn sx-btn-ghost">Reset</a>
+                        <button type="submit" class="sx-btn sx-btn-primary">Save changes</button>
+                    </div>
+                </form>
 
-<div id="passwordModal" class="settings-modal">
-    <div class="settings-modal-panel">
-        <h3>Change Password</h3>
-        <form method="POST">
-            <input type="hidden" name="change_password" value="1">
+            <?php else: ?>
+                <form method="POST" class="sx-card st-card" style="max-width: 560px">
+                    <input type="hidden" name="csrf_token" value="<?= h($csrf_token) ?>">
+                    <input type="hidden" name="change_password" value="1">
+                    <h2>Password</h2>
+                    <p>
+                        Use a password you don't use anywhere else.
+                        <?php if (!empty($user['google_id'])): ?>
+                            Signed up with Google? <a href="/sweepxpress/forgot_password.php">Set a password by email</a>.
+                        <?php endif; ?>
+                    </p>
 
-            <div class="form-group">
-                <label>Current Password</label>
-                <input type="password" name="current_password" required>
-            </div>
-            <div class="form-group">
-                <label>New Password</label>
-                <input type="password" name="new_password" required>
-            </div>
-            <div class="form-group">
-                <label>Confirm New Password</label>
-                <input type="password" name="confirm_password" required>
-            </div>
+                    <div class="sx-field">
+                        <label class="sx-label" for="current_password">Current password</label>
+                        <div class="sx-pass">
+                            <input type="password" id="current_password" name="current_password" class="sx-input" required autocomplete="current-password">
+                            <button type="button" data-sx-toggle="current_password" aria-label="Show password"><i class="fa-solid fa-eye"></i></button>
+                        </div>
+                    </div>
+                    <div class="sx-field">
+                        <label class="sx-label" for="new_password">New password</label>
+                        <div class="sx-pass">
+                            <input type="password" id="new_password" name="new_password" class="sx-input" required minlength="10"
+                                   autocomplete="new-password" aria-describedby="passRules">
+                            <button type="button" data-sx-toggle="new_password" aria-label="Show password"><i class="fa-solid fa-eye"></i></button>
+                        </div>
+                        <ul class="sx-rules" id="passRules">
+                            <li data-rule="length"><i class="fa-regular fa-circle"></i> 10+ characters</li>
+                            <li data-rule="letter"><i class="fa-regular fa-circle"></i> A letter</li>
+                            <li data-rule="number"><i class="fa-regular fa-circle"></i> A number</li>
+                            <li data-rule="special"><i class="fa-regular fa-circle"></i> A special character</li>
+                        </ul>
+                    </div>
+                    <div class="sx-field">
+                        <label class="sx-label" for="confirm_password">Confirm new password</label>
+                        <div class="sx-pass">
+                            <input type="password" id="confirm_password" name="confirm_password" class="sx-input" required autocomplete="new-password">
+                            <button type="button" data-sx-toggle="confirm_password" aria-label="Show password"><i class="fa-solid fa-eye"></i></button>
+                        </div>
+                    </div>
 
-            <div class="mt-4 d-flex justify-content-end">
-                <button type="submit" class="btn-pill-primary">Update Password</button>
-                <button type="button" class="btn-pill-secondary" onclick="closePasswordModal()">Cancel</button>
-            </div>
-        </form>
+                    <div class="st-actions">
+                        <button type="submit" class="sx-btn sx-btn-primary">Update password</button>
+                    </div>
+                </form>
+            <?php endif; ?>
+        </div>
     </div>
 </div>
 
 <script>
-function openProfileModal() {
-    document.getElementById('profileModal').style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-}
-
-function closeProfileModal() {
-    document.getElementById('profileModal').style.display = 'none';
-    document.body.style.overflow = '';
-}
-
-function openPasswordModal() {
-    document.getElementById('passwordModal').style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-}
-
-function closePasswordModal() {
-    document.getElementById('passwordModal').style.display = 'none';
-    document.body.style.overflow = '';
-}
-
-// Profile image live preview
-document.getElementById('profileImgInput')?.addEventListener('change', function(event) {
-    const file = event.target.files[0];
-    if (file) {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            document.getElementById('profileImagePreview').src = e.target.result;
-            document.querySelector('.profile-header-strip img').src = e.target.result;
-        };
-        reader.readAsDataURL(file);
-    }
-});
-
-// Close modals on overlay click
-document.querySelectorAll('.settings-modal').forEach(modal => {
-    modal.addEventListener('click', function(e) {
-        if (e.target === this) {
-            this.style.display = 'none';
-            document.body.style.overflow = '';
-        }
-    });
-});
-
-// Close modal on Escape key
-document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') {
-        document.querySelectorAll('.settings-modal').forEach(modal => {
-            modal.style.display = 'none';
+document.addEventListener('DOMContentLoaded', function () {
+    // Preview ng bagong photo bago i-save
+    const photo = document.getElementById('profileImgInput');
+    if (photo) {
+        photo.addEventListener('change', function () {
+            const file = this.files[0];
+            if (!file) return;
+            if (file.size > 2 * 1024 * 1024) {
+                sxToast('Photo must be 2 MB or smaller', 'error');
+                this.value = '';
+                return;
+            }
+            const url = URL.createObjectURL(file);
+            document.getElementById('photoPreview').src = url;
+            document.getElementById('sideAvatar').src = url;
         });
-        document.body.style.overflow = '';
+    }
+
+    sxPasswordToggles();
+    sxPasswordRules(document.getElementById('new_password'), document.getElementById('passRules'));
+
+    // Confirm password: browser message kapag hindi tugma
+    const np = document.getElementById('new_password');
+    const cp = document.getElementById('confirm_password');
+    if (np && cp) {
+        const check = () => cp.setCustomValidity(cp.value && cp.value !== np.value ? 'Passwords do not match' : '');
+        np.addEventListener('input', check);
+        cp.addEventListener('input', check);
     }
 });
-
-// JS: set max birthdate to today
-(function() {
-    const birthInput = document.getElementById('birthdateInput');
-    if (birthInput) {
-        const today = new Date().toISOString().split('T')[0];
-        birthInput.setAttribute('max', today);
-    }
-})();
 </script>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
