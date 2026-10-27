@@ -8,9 +8,17 @@ require_once __DIR__ . '/../config.php';
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SweepXpress</title>
 
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/sweepxpress/assets/style.css">
+    <!-- Font: Plus Jakarta Sans (iisang font ng buong site) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <!-- PANSAMANTALA: ginagamit pa ng 16 file; aalisin sa Phase 9 kapag Font Awesome na lahat -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+    <!-- Huling CSS para ang design tokens at sx- components ang masunod -->
+    <link rel="stylesheet" href="/sweepxpress/assets/style.css">
 
     <style>
         /* (CSS is omitted for brevity, it remains the same as previously provided) */
@@ -19,9 +27,9 @@ require_once __DIR__ . '/../config.php';
             padding: 0;
             box-sizing: border-box;
         }
-        *:focus {
-            outline: none !important;
-            box-shadow: none !important;
+        /* Walang outline sa pag-click ng mouse; may focus ring kapag keyboard (Tab) */
+        *:focus:not(:focus-visible) {
+            outline: none;
         }
         body {
             padding-top: 80px;
@@ -58,11 +66,7 @@ require_once __DIR__ . '/../config.php';
             gap: 0.15rem;
             white-space: nowrap;
         }
-        /* LOGO COLOR – unified for all pages */
-        .navbar-brand .text-primary {
-            color: #3366ff !important;
-            font-weight: 900;
-        }
+        /* LOGO: gradient wordmark (.sx-wordmark sa style.css) */
 
         .navbar-light .nav-link {
             color: #334155 !important;
@@ -73,8 +77,8 @@ require_once __DIR__ . '/../config.php';
             transition: background 0.18s ease, color 0.18s ease;
         }
         .navbar-light .nav-link:hover {
-            color: #3366ff !important;
-            background: rgba(51, 102, 255, 0.08);
+            color: var(--sx-primary) !important;
+            background: color-mix(in srgb, var(--sx-primary) 8%, transparent);
         }
 
         /* Profile chip inside menu */
@@ -83,7 +87,7 @@ require_once __DIR__ . '/../config.php';
             align-items: center;
             gap: 0.55rem;
             padding: 0.35rem 0.8rem;
-            background: rgba(51, 102, 255, 0.06);
+            background: color-mix(in srgb, var(--sx-primary) 6%, transparent);
             border-radius: 999px;
         }
         .profile-img {
@@ -91,7 +95,7 @@ require_once __DIR__ . '/../config.php';
             height: 34px;
             border-radius: 50%;
             object-fit: cover;
-            border: 2px solid #3366ff;
+            border: 2px solid var(--sx-primary);
         }
         .navbar-text {
             color: #1e293b !important;
@@ -106,8 +110,8 @@ require_once __DIR__ . '/../config.php';
             height: 38px;
             border-radius: 50%;
             overflow: hidden;
-            border: 2px solid #3366ff;
-            background: rgba(51, 102, 255, 0.06);
+            border: 2px solid var(--sx-primary);
+            background: color-mix(in srgb, var(--sx-primary) 6%, transparent);
             display: none; /* shown on mobile when logged in */
             align-items: center;
             justify-content: center;
@@ -129,16 +133,16 @@ require_once __DIR__ . '/../config.php';
             justify-content: center;
             width: 40px;
             height: 40px;
-            background: rgba(51, 102, 255, 0.06);
+            background: color-mix(in srgb, var(--sx-primary) 6%, transparent);
             border-radius: 50%;
             transition: background 0.18s ease, transform 0.16s ease;
         }
         .cart-link:hover {
-            background: rgba(51, 102, 255, 0.14);
+            background: color-mix(in srgb, var(--sx-primary) 14%, transparent);
             transform: translateY(-1px);
         }
         .cart-link i {
-            color: #3366ff;
+            color: var(--sx-primary);
             font-size: 1.2rem;
         }
         #cart-badge {
@@ -161,14 +165,14 @@ require_once __DIR__ . '/../config.php';
 
         /* Logout */
         .btn-logout {
-            background: linear-gradient(135deg, #3366ff 0%, #5588ff 100%);
+            background: linear-gradient(135deg, var(--sx-primary) 0%, var(--sx-primary-light) 100%);
             color: #ffffff !important;
             border: none;
             font-weight: 700;
             font-size: 0.9rem;
             padding: 0.55rem 1.6rem;
             border-radius: 999px;
-            box-shadow: 0 3px 12px rgba(51, 102, 255, 0.3);
+            box-shadow: 0 3px 12px color-mix(in srgb, var(--sx-primary) 30%, transparent);
         }
 
         /* Sidebar burger (left) */
@@ -176,9 +180,9 @@ require_once __DIR__ . '/../config.php';
             width: 40px;
             height: 40px;
             border-radius: 12px;
-            border: 2px solid rgba(51, 102, 255, 0.22);
-            background: rgba(51, 102, 255, 0.06);
-            color: #3366ff;
+            border: 2px solid color-mix(in srgb, var(--sx-primary) 22%, transparent);
+            background: color-mix(in srgb, var(--sx-primary) 6%, transparent);
+            color: var(--sx-primary);
             font-size: 1.25rem;
             display: inline-flex;
             align-items: center;
@@ -192,7 +196,7 @@ require_once __DIR__ . '/../config.php';
             padding: 0.25rem 0.45rem;
         }
         .navbar-toggler-icon {
-            background-image:url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba(51,102,255,0.9)' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
+            background-image:url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba(30,58,138,0.9)' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
             width:1.4em;
             height:1.4em;
         }
@@ -220,7 +224,7 @@ require_once __DIR__ . '/../config.php';
             height: 40px;
             border-radius: 50%;
             background: rgba(255, 255, 255, 0.98);
-            box-shadow: 0 4px 16px rgba(51, 102, 255, 0.2);
+            box-shadow: 0 4px 16px color-mix(in srgb, var(--sx-primary) 20%, transparent);
         }
         .ptr-spinner::before {
             content: '';
@@ -231,7 +235,7 @@ require_once __DIR__ . '/../config.php';
             height: 28px;
             margin-top: -14px;
             margin-left: -14px;
-            border: 3px solid rgba(51, 102, 255, 0.12);
+            border: 3px solid color-mix(in srgb, var(--sx-primary) 12%, transparent);
             border-radius: 50%;
         }
         .ptr-spinner::after {
@@ -244,8 +248,8 @@ require_once __DIR__ . '/../config.php';
             margin-top: -14px;
             margin-left: -14px;
             border: 3px solid transparent;
-            border-top-color: #3366ff;
-            border-right-color: #3366ff;
+            border-top-color: var(--sx-primary);
+            border-right-color: var(--sx-primary);
             border-radius: 50%;
             transition: transform 0.12s ease-out;
         }
@@ -348,7 +352,7 @@ require_once __DIR__ . '/../config.php';
         });
     </script>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
     <script src="/sweepxpress/assets/script.js" defer></script>
 </head>
 <body>
@@ -394,7 +398,7 @@ if (is_logged_in() && isset($_SESSION['user'])) {
                 echo '/sweepxpress/index.php';
             }
         ?>">
-            <span class="text-primary">sweepX</span>press
+            <span class="sx-wordmark">Sweep<span class="sx-wordmark-x">X</span>press</span>
         </a>
 
         <div class="header-right d-flex align-items-center gap-2 ms-auto">

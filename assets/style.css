@@ -3,6 +3,158 @@
 /* ========================================================= */
 
 /* ===================== */
+/* Design Tokens (Phase 6) — iisang pinagmumulan ng kulay, font, spacing */
+/* Mga kulay = galing sa SweepXpress logo (navy, emerald, mint) */
+/* ===================== */
+:root {
+  /* Brand — galing sa logo */
+  --sx-primary: #1e3a8a;        /* navy: ang "X" at background ng logo */
+  --sx-primary-light: #2b4fb8;  /* hover */
+  --sx-primary-soft: #e8eefb;
+  --sx-accent: #10b981;         /* emerald: ang tape ng kahon */
+  --sx-accent-dark: #047857;    /* emerald na text sa puti */
+  --sx-accent-light: #6ee7b7;   /* mint: ang arrow */
+  --sx-accent-soft: #d1fae5;
+
+  /* Neutrals (may kaunting tint ng navy) */
+  --sx-dark: #0b1735;           /* headings, dark buttons */
+  --sx-text: #1e293b;           /* body text */
+  --sx-muted: #64748b;          /* secondary text */
+  --sx-border: #e2e8f0;
+  --sx-border-light: #f1f5f9;
+  --sx-bg: #f4f7fb;             /* page background */
+  --sx-surface: #ffffff;        /* cards */
+  --sx-surface-alt: #f8fafc;    /* table headers, subtle panels */
+
+  /* Text sa ibabaw ng may kulay na background (nagbabago sa dark mode) */
+  --sx-on-primary: #ffffff;
+  --sx-on-dark: #ffffff;
+  --sx-on-accent: #0b1735;      /* navy text sa emerald (puti = 2.5:1, hindi pasado) */
+
+  /* Gradients mula sa logo */
+  --sx-gradient-brand: linear-gradient(135deg, #334a6e 0%, #1e3a8a 45%, #10b981 100%);
+  --sx-gradient-wordmark: linear-gradient(180deg, #1e3a8a 0%, #1f5f8f 42%, #10b981 75%, #6ee7b7 100%);
+  --sx-gradient-x: linear-gradient(180deg, #10b981 0%, #047857 100%);
+  --sx-gradient-arrow: linear-gradient(90deg, #10b981 0%, #6ee7b7 100%);
+
+  /* Feedback */
+  --sx-success: #10b981;
+  --sx-warning: #f59e0b;
+  --sx-danger: #ef4444;
+  --sx-info: #06b6d4;
+
+  /* Order status pills (bg / text) — galing sa umiiral na badges */
+  --sx-status-pending-bg: #fefce8;    --sx-status-pending: #a16207;
+  --sx-status-preparing-bg: #eff6ff;  --sx-status-preparing: #1d4ed8;
+  --sx-status-shipped-bg: #ecfeff;    --sx-status-shipped: #0e7490;
+  --sx-status-delivered-bg: #f0fdf4;  --sx-status-delivered: #15803d;
+  --sx-status-completed-bg: #dcfce7;  --sx-status-completed: #166534;
+  --sx-status-cancelled-bg: #fef2f2;  --sx-status-cancelled: #b91c1c;
+
+  /* Typography */
+  --sx-font: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  --sx-font-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+  --sx-text-xs: 0.75rem;
+  --sx-text-sm: 0.875rem;
+  --sx-text-base: 1rem;
+  --sx-text-lg: 1.125rem;
+  --sx-text-xl: 1.25rem;
+  --sx-text-2xl: 1.5rem;
+  --sx-text-3xl: 2rem;
+  --sx-text-4xl: clamp(2.25rem, 1.6rem + 3vw, 3.5rem);  /* hero heading, lumiliit sa mobile */
+  --sx-weight-regular: 400;
+  --sx-weight-medium: 500;
+  --sx-weight-semibold: 600;
+  --sx-weight-bold: 700;
+  --sx-weight-extrabold: 800;
+  --sx-leading-tight: 1.15;     /* malalaking heading */
+  --sx-leading: 1.5;
+  --sx-tracking-tight: -0.02em; /* masikip na heading, gaya ng reference */
+
+  /* Spacing (4px scale) */
+  --sx-space-1: 4px;
+  --sx-space-2: 8px;
+  --sx-space-3: 12px;
+  --sx-space-4: 16px;
+  --sx-space-5: 24px;
+  --sx-space-6: 32px;
+  --sx-space-7: 48px;
+  --sx-space-8: 64px;
+  --sx-space-9: 96px;
+
+  /* Radius (galing sa mga pinakaginagamit ngayon) */
+  --sx-radius-sm: 8px;
+  --sx-radius-md: 12px;
+  --sx-radius-lg: 16px;
+  --sx-radius-xl: 24px;
+  --sx-radius-pill: 999px;
+
+  /* Shadows (malambot) */
+  --sx-shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06);
+  --sx-shadow-md: 0 8px 24px rgba(15, 23, 42, 0.06);
+  --sx-shadow-lg: 0 20px 48px rgba(15, 23, 42, 0.10);
+  --sx-focus-ring: 0 0 0 3px color-mix(in srgb, var(--sx-primary) 30%, transparent);
+
+  /* Motion at layout */
+  --sx-transition: 0.2s ease;
+  --sx-container: 1240px;       /* para sa bagong sx- layout; hindi ginagalaw ang .container */
+
+  /* Bootstrap: sumunod sa font at brand color */
+  --bs-body-font-family: var(--sx-font);
+  --bs-primary: var(--sx-primary);
+  --bs-primary-rgb: 30, 58, 138;
+  --bs-link-color: var(--sx-primary);
+  --bs-link-color-rgb: 30, 58, 138;
+  --bs-link-hover-color: var(--sx-primary-light);
+  --bs-link-hover-color-rgb: 43, 79, 184;
+}
+
+/* ===================== */
+/* Dark mode tokens — styleguide toggle lang muna; site-wide sa Phase 9 */
+/* ===================== */
+:root[data-theme="dark"] {
+  --sx-primary: #7c9cff;
+  --sx-primary-light: #9fb6ff;
+  --sx-primary-soft: #1a2650;
+  --sx-accent: #34d399;
+  --sx-accent-dark: #6ee7b7;    /* text variant: mint sa madilim */
+  --sx-accent-light: #a7f3d0;
+  --sx-accent-soft: #0e3b30;
+
+  --sx-dark: #f1f5f9;           /* headings at inverted buttons */
+  --sx-text: #e2e8f0;
+  --sx-muted: #94a3b8;
+  --sx-border: #26324d;
+  --sx-border-light: #1b2540;
+  --sx-bg: #0a1022;
+  --sx-surface: #111a30;
+  --sx-surface-alt: #16213d;
+
+  --sx-on-primary: #0a1022;
+  --sx-on-dark: #0a1022;
+  --sx-on-accent: #0a1022;
+
+  --sx-gradient-wordmark: linear-gradient(180deg, #a5b8ff 0%, #8fc9e0 42%, #6ee7b7 75%, #a7f3d0 100%);
+  --sx-gradient-x: linear-gradient(180deg, #a7f3d0 0%, #34d399 100%);
+
+  --sx-status-pending-bg: #3a2e0b;    --sx-status-pending: #fcd34d;
+  --sx-status-preparing-bg: #172554;  --sx-status-preparing: #93c5fd;
+  --sx-status-shipped-bg: #083344;    --sx-status-shipped: #67e8f9;
+  --sx-status-delivered-bg: #052e16;  --sx-status-delivered: #86efac;
+  --sx-status-completed-bg: #064e3b;  --sx-status-completed: #6ee7b7;
+  --sx-status-cancelled-bg: #450a0a;  --sx-status-cancelled: #fca5a5;
+
+  --sx-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --sx-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --sx-shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.45);
+
+  --bs-primary-rgb: 124, 156, 255;
+  --bs-link-color-rgb: 124, 156, 255;
+  --bs-link-hover-color-rgb: 159, 182, 255;
+  color-scheme: dark;
+}
+
+/* ===================== */
 /* Reset & Base */
 /* ===================== */
 * {
@@ -11,9 +163,9 @@
 }
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Arial, sans-serif;
-  background: #f5f7fa;
-  color: #1a1a1a;
+  font-family: var(--sx-font);
+  background: var(--sx-bg);
+  color: var(--sx-text);
   line-height: 1.5;
 }
 
@@ -53,7 +205,7 @@ body {
   letter-spacing: -0.5px;
 }
 .logo span {
-  color: #3366ff; /* Primary Blue for Accent */
+  color: var(--sx-primary); /* Primary Blue for Accent */
 }
 nav a {
   color: #1a1a1a; /* Adjusted for light background */
@@ -72,7 +224,7 @@ nav a:hover {
 nav a.btn,
 .btn {
   /* CRITICAL FIX: Use !important to override any specific background or gradient */
-  background: #5588ff !important; /* Accent Blue */
+  background: var(--sx-primary-light) !important; /* Accent Blue */
   color: #fff !important;
   padding: 10px 16px;
   border-radius: 14px;
@@ -80,14 +232,14 @@ nav a.btn,
   text-decoration: none;
   border: none;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(51,102,255,0.25); /* Adjusted shadow to match blue theme */
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--sx-primary) 25%, transparent); /* Adjusted shadow to match blue theme */
   transition: transform 0.1s, opacity 0.2s;
 }
 
 .btn-secondary {
-    background: #5588ff !important; /* Accent Blue */
+    background: var(--sx-primary-light) !important; /* Accent Blue */
     color: #fff !important;
-    box-shadow: 0 4px 12px rgba(51,102,255,0.25);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--sx-primary) 25%, transparent);
 }
 
 .btn:hover {
@@ -102,12 +254,12 @@ nav a.btn,
   padding: 8px 14px;
   border-radius: 12px;
   font-weight: 500;
-  color: #3366ff; /* Primary Blue for Outline Text */
+  color: var(--sx-primary); /* Primary Blue for Outline Text */
   transition: border 0.2s, box-shadow 0.2s;
 }
 .btn-outline:hover {
-  border-color: #3366ff;
-  box-shadow: 0 0 0 3px rgba(51,102,255,0.15);
+  border-color: var(--sx-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sx-primary) 15%, transparent);
 }
 
 /* ===================== */
@@ -157,7 +309,7 @@ nav a.btn,
 .price {
   font-weight: 700;
   margin: 8px 0;
-  color: #3366ff; /* Primary Blue */
+  color: var(--sx-primary); /* Primary Blue */
 }
 
 /* ===================== */
@@ -176,8 +328,8 @@ select {
 input:focus,
 textarea:focus,
 select:focus {
-  border-color: #5588ff; /* Accent Blue */
-  box-shadow: 0 0 0 3px rgba(85,136,255,0.2);
+  border-color: var(--sx-primary-light); /* Accent Blue */
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sx-primary-light) 20%, transparent);
   outline: none;
 }
 
@@ -187,7 +339,7 @@ select:focus {
 .footer {
   margin-top: 48px;
   padding: 28px;
-  background: #3366ff; /* Primary Blue */
+  background: var(--sx-primary); /* Primary Blue */
   color: #fff;
   text-align: center;
   border-top: 1px solid rgba(255,255,255,0.08);
@@ -253,8 +405,8 @@ select:focus {
   text-align: center;
 }
 .badge {
-  background: rgba(85, 136, 255, 0.15); /* Light Accent Blue */
-  color: #3366ff; /* Primary Blue */
+  background: color-mix(in srgb, var(--sx-primary-light) 15%, transparent); /* Light Accent Blue */
+  color: var(--sx-primary); /* Primary Blue */
   padding: 4px 10px;
   border-radius: 999px;
   font-size: 12px;
@@ -344,7 +496,7 @@ body {
   left: -280px;
   width: 280px;
   height: 100%;
-  background: #5588ff; /* Restored Dark Background */
+  background: var(--sx-primary-light); /* Restored Dark Background */
   color: #fff;
   box-shadow: 4px 0 30px rgba(0,0,0,0.25);
   transition: left 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);
@@ -415,7 +567,7 @@ body {
   margin-right: 15px;
   width: 24px;
   text-align: center;
-  color: #5588ff; /* Accent Blue for Icons on Dark Background */
+  color: var(--sx-primary-light); /* Accent Blue for Icons on Dark Background */
   transition: transform 0.3s ease;
 }
 .sidebar ul li a:hover i {
@@ -490,7 +642,7 @@ body {
   width: 50px;
   height: 50px;
   border-radius: 50%;
-  background: #3366ff; /* Primary Blue */
+  background: var(--sx-primary); /* Primary Blue */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -625,7 +777,7 @@ body {
   position: absolute;
   top: 5px;
   right: 5px;
-  background-color: #3366ff; /* Primary Blue */
+  background-color: var(--sx-primary); /* Primary Blue */
   color: white;
   border: none;
   cursor: pointer;
@@ -641,7 +793,7 @@ body {
 .add-image-box {
   width: 150px;
   height: 150px;
-  border: 2px dashed #5588ff; /* Accent Blue */
+  border: 2px dashed var(--sx-primary-light); /* Accent Blue */
   display: flex;
   justify-content: center;
   align-items: center;
@@ -649,7 +801,7 @@ body {
 }
 .plus-btn {
   font-size: 3rem;
-  color: #5588ff; /* Accent Blue */
+  color: var(--sx-primary-light); /* Accent Blue */
   font-weight: bold;
   cursor: pointer;
 }
@@ -696,7 +848,7 @@ body {
   border: none;
   cursor: pointer;
   font-size: 1.2rem;
-  color: #3366ff; /* Primary Blue */
+  color: var(--sx-primary); /* Primary Blue */
   padding: 8px;
   display: flex;
   justify-content: center;
@@ -723,8 +875,426 @@ body {
 
 /* Ensure social buttons are also blue */
 .btn-google, .btn-facebook {
-  background: #5588ff !important; /* Accent Blue */
+  background: var(--sx-primary-light) !important; /* Accent Blue */
   color: #fff !important;
   border-radius: 8px;   /* square-ish but not sharp */
   font-size: 1.2rem;
+}
+
+/* ========================================================= */
+/* ================ Components (Phase 6c) ================== */
+/* Gamitin ang mga sx- class sa mga bagong/inaayos na page.  */
+/* ========================================================= */
+
+/* ----- Focus (keyboard) ----- */
+:focus-visible {
+  outline: 2px solid var(--sx-primary);
+  outline-offset: 2px;
+}
+
+/* ----- Layout ----- */
+.sx-container {
+  max-width: var(--sx-container);
+  margin-inline: auto;
+  padding-inline: var(--sx-space-4);
+}
+.sx-section { padding-block: var(--sx-space-8); }
+
+@media (min-width: 768px) {
+  .sx-container { padding-inline: var(--sx-space-6); }
+  .sx-section { padding-block: var(--sx-space-9); }
+}
+
+.sx-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: var(--sx-space-4);
+  margin-bottom: var(--sx-space-6);
+}
+.sx-page-title {
+  margin: 0;
+  font-size: var(--sx-text-3xl);
+  font-weight: var(--sx-weight-extrabold);
+  letter-spacing: var(--sx-tracking-tight);
+  line-height: var(--sx-leading-tight);
+  color: var(--sx-dark);
+}
+.sx-page-subtitle {
+  margin: var(--sx-space-1) 0 0;
+  color: var(--sx-muted);
+}
+
+/* ----- Typography ----- */
+.sx-eyebrow {                       /* "— About Us" */
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sx-space-2);
+  margin-bottom: var(--sx-space-3);
+  font-size: var(--sx-text-sm);
+  font-weight: var(--sx-weight-semibold);
+  color: var(--sx-muted);
+}
+.sx-eyebrow::before {
+  content: "";
+  width: 20px;
+  height: 2px;
+  background: currentColor;
+}
+.sx-heading-xl,
+.sx-heading-lg,
+.sx-heading-md {
+  margin: 0;
+  color: var(--sx-dark);
+  font-weight: var(--sx-weight-extrabold);
+  letter-spacing: var(--sx-tracking-tight);
+  line-height: var(--sx-leading-tight);
+}
+.sx-heading-xl { font-size: var(--sx-text-4xl); }   /* hero */
+.sx-heading-lg { font-size: var(--sx-text-3xl); }   /* section */
+.sx-heading-md { font-size: var(--sx-text-2xl); font-weight: var(--sx-weight-bold); }
+.sx-lead {
+  font-size: var(--sx-text-lg);
+  line-height: 1.6;
+  color: var(--sx-muted);
+}
+
+/* ----- Buttons ----- */
+.sx-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sx-space-2);
+  padding: 12px 22px;
+  font: inherit;
+  font-size: var(--sx-text-sm);
+  font-weight: var(--sx-weight-semibold);
+  line-height: 1.2;
+  white-space: nowrap;
+  text-decoration: none;
+  border: 1px solid transparent;
+  border-radius: var(--sx-radius-pill);
+  cursor: pointer;
+  transition: background var(--sx-transition), color var(--sx-transition),
+              border-color var(--sx-transition), box-shadow var(--sx-transition),
+              transform var(--sx-transition);
+}
+.sx-btn:hover { transform: translateY(-1px); }
+.sx-btn:active { transform: none; }
+.sx-btn:focus-visible { outline: none; box-shadow: var(--sx-focus-ring); }
+.sx-btn:disabled,
+.sx-btn[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.sx-btn-primary { background: var(--sx-primary); color: var(--sx-on-primary); }
+.sx-btn-primary:hover { background: var(--sx-primary-light); color: var(--sx-on-primary); }
+
+.sx-btn-dark { background: var(--sx-dark); color: var(--sx-on-dark); }
+.sx-btn-dark:hover { background: color-mix(in srgb, var(--sx-dark) 85%, var(--sx-bg)); color: var(--sx-on-dark); }
+
+.sx-btn-accent { background: var(--sx-accent); color: var(--sx-on-accent); }
+.sx-btn-accent:hover { background: var(--sx-accent-light); color: var(--sx-on-accent); }
+
+.sx-btn-outline { background: var(--sx-surface); color: var(--sx-dark); border-color: var(--sx-border); }
+.sx-btn-outline:hover { border-color: var(--sx-dark); color: var(--sx-dark); }
+
+.sx-btn-ghost { background: transparent; color: var(--sx-dark); }
+.sx-btn-ghost:hover { background: var(--sx-surface-alt); color: var(--sx-dark); }
+
+.sx-btn-danger { background: var(--sx-danger); color: #fff; }
+.sx-btn-danger:hover { background: color-mix(in srgb, var(--sx-danger) 85%, #000); color: #fff; }
+
+.sx-btn-sm { padding: 8px 16px; font-size: var(--sx-text-xs); }
+.sx-btn-lg { padding: 14px 28px; font-size: var(--sx-text-base); }
+.sx-btn-block { width: 100%; }
+
+/* Pill na may bilog na arrow: <a class="sx-btn sx-btn-dark sx-btn-arrow">Shop Now <span class="sx-btn-icon"><i class="fa-solid fa-arrow-right"></i></span></a> */
+.sx-btn-arrow { padding-right: 6px; }
+.sx-btn-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--sx-radius-pill);
+  background: color-mix(in srgb, currentColor 20%, transparent);
+  transform: rotate(-45deg);        /* ↗ */
+  transition: transform var(--sx-transition);
+}
+.sx-btn-arrow:hover .sx-btn-icon { transform: rotate(0); }  /* → kapag hover */
+.sx-btn-outline .sx-btn-icon,
+.sx-btn-ghost .sx-btn-icon { background: var(--sx-dark); color: var(--sx-on-dark); }
+
+/* ----- Cards ----- */
+.sx-card {
+  background: var(--sx-surface);
+  border: 1px solid var(--sx-border);
+  border-radius: var(--sx-radius-xl);
+  padding: var(--sx-space-5);
+  box-shadow: var(--sx-shadow-sm);
+}
+.sx-card-flush { padding: 0; overflow: hidden; }
+.sx-card-hover { transition: transform var(--sx-transition), box-shadow var(--sx-transition); }
+.sx-card-hover:hover { transform: translateY(-4px); box-shadow: var(--sx-shadow-md); }
+
+/* Stat card (dashboard numbers) */
+.sx-stat { display: flex; flex-direction: column; gap: var(--sx-space-1); }
+.sx-stat-label {
+  font-size: var(--sx-text-xs);
+  font-weight: var(--sx-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--sx-muted);
+}
+.sx-stat-value {
+  font-size: var(--sx-text-2xl);
+  font-weight: var(--sx-weight-extrabold);
+  letter-spacing: var(--sx-tracking-tight);
+  color: var(--sx-dark);
+}
+.sx-stat-meta { font-size: var(--sx-text-sm); color: var(--sx-muted); }
+
+/* Larawan na may nakapatong na badge ("100+ Cleaning Experts") */
+.sx-media {
+  position: relative;
+  border-radius: var(--sx-radius-xl);
+  overflow: hidden;
+}
+.sx-media > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.sx-badge-float {
+  position: absolute;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 16px;
+  background: color-mix(in srgb, var(--sx-surface) 92%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: var(--sx-radius-lg);
+  box-shadow: var(--sx-shadow-md);
+  color: var(--sx-dark);
+}
+.sx-badge-float strong { font-size: var(--sx-text-lg); font-weight: var(--sx-weight-extrabold); }
+.sx-badge-float span { font-size: var(--sx-text-xs); color: var(--sx-muted); }
+.sx-badge-float-dark { background: var(--sx-dark); color: var(--sx-on-dark); }
+.sx-badge-float-dark span { color: color-mix(in srgb, var(--sx-on-dark) 70%, transparent); }
+.sx-pos-tl { top: var(--sx-space-4); left: var(--sx-space-4); }
+.sx-pos-tr { top: var(--sx-space-4); right: var(--sx-space-4); }
+.sx-pos-bl { bottom: var(--sx-space-4); left: var(--sx-space-4); }
+.sx-pos-br { bottom: var(--sx-space-4); right: var(--sx-space-4); }
+
+/* Feature item na may icon ("Verified Professionals") */
+.sx-feature { display: flex; gap: var(--sx-space-3); align-items: flex-start; }
+.sx-feature-icon {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--sx-radius-md);
+  background: var(--sx-primary-soft);
+  color: var(--sx-primary);
+}
+.sx-feature-title { margin: 0 0 2px; font-weight: var(--sx-weight-bold); color: var(--sx-dark); }
+.sx-feature-text { margin: 0; font-size: var(--sx-text-sm); color: var(--sx-muted); }
+
+/* Category chips */
+.sx-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sx-space-2);
+  padding: 8px 16px;
+  font-size: var(--sx-text-sm);
+  font-weight: var(--sx-weight-semibold);
+  color: var(--sx-muted);
+  background: var(--sx-surface);
+  border: 1px solid var(--sx-border);
+  border-radius: var(--sx-radius-pill);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--sx-transition), color var(--sx-transition), border-color var(--sx-transition);
+}
+.sx-chip:hover,
+.sx-chip.is-active { background: var(--sx-dark); border-color: var(--sx-dark); color: var(--sx-on-dark); }
+
+/* ----- Wordmark: "SweepXpress" na may pababang gradient (navy → emerald) ----- */
+.sx-wordmark {
+  font-weight: var(--sx-weight-extrabold);
+  letter-spacing: -0.03em;
+  background-image: var(--sx-gradient-wordmark);
+  background-size: 100% 133%;       /* nakikita: navy → emerald; nakatago sa ibaba: mint */
+  background-position: 50% 0%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  transition: background-position 0.5s ease;
+}
+.sx-wordmark:hover,
+a:hover > .sx-wordmark { background-position: 50% 100%; }  /* dumudulas pataas ang kulay */
+.sx-wordmark-x {
+  display: inline-block;
+  font-weight: 900;
+  font-size: 1.08em;
+  background-image: var(--sx-gradient-x);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ----- Forms ----- */
+.sx-field { display: flex; flex-direction: column; gap: var(--sx-space-2); margin-bottom: var(--sx-space-4); }
+.sx-label { font-size: var(--sx-text-sm); font-weight: var(--sx-weight-semibold); color: var(--sx-dark); }
+.sx-input,
+.sx-select,
+.sx-textarea {
+  width: 100%;
+  padding: 12px 14px;
+  font: inherit;
+  font-size: var(--sx-text-sm);
+  color: var(--sx-text);
+  background: var(--sx-surface);
+  border: 1px solid var(--sx-border);
+  border-radius: var(--sx-radius-md);
+  transition: border-color var(--sx-transition), box-shadow var(--sx-transition);
+}
+.sx-input::placeholder,
+.sx-textarea::placeholder { color: var(--sx-muted); opacity: 0.7; }
+.sx-input:focus,
+.sx-select:focus,
+.sx-textarea:focus {
+  outline: none;
+  border-color: var(--sx-primary);
+  box-shadow: var(--sx-focus-ring);
+}
+.sx-textarea { min-height: 120px; resize: vertical; }
+.sx-hint { font-size: var(--sx-text-xs); color: var(--sx-muted); }
+.sx-error { font-size: var(--sx-text-xs); font-weight: var(--sx-weight-medium); color: var(--sx-danger); }
+.sx-field.is-invalid .sx-input,
+.sx-field.is-invalid .sx-select,
+.sx-field.is-invalid .sx-textarea { border-color: var(--sx-danger); }
+.sx-field.is-invalid .sx-input:focus,
+.sx-field.is-invalid .sx-select:focus,
+.sx-field.is-invalid .sx-textarea:focus { box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2); }
+.sx-check { display: inline-flex; align-items: center; gap: var(--sx-space-2); font-size: var(--sx-text-sm); cursor: pointer; }
+.sx-check input { accent-color: var(--sx-primary); width: 16px; height: 16px; }
+
+/* ----- Tables ----- */
+.sx-table-wrap {
+  background: var(--sx-surface);
+  border: 1px solid var(--sx-border);
+  border-radius: var(--sx-radius-xl);
+  overflow-x: auto;
+}
+.sx-table { width: 100%; border-collapse: collapse; font-size: var(--sx-text-sm); }
+.sx-table th {
+  padding: 14px 20px;
+  text-align: left;
+  font-size: var(--sx-text-xs);
+  font-weight: var(--sx-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--sx-muted);
+  background: var(--sx-surface-alt);
+  border-bottom: 1px solid var(--sx-border);
+  white-space: nowrap;
+}
+.sx-table td {
+  padding: 16px 20px;
+  color: var(--sx-text);
+  vertical-align: middle;
+  border-bottom: 1px solid var(--sx-border-light);
+}
+.sx-table tbody tr:last-child td { border-bottom: none; }
+.sx-table tbody tr:hover { background: var(--sx-surface-alt); }
+.sx-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Mobile: bawat row ay nagiging card (lagyan ng data-label ang bawat <td>) */
+@media (max-width: 768px) {
+  .sx-table-wrap.sx-stack { background: transparent; border: none; overflow: visible; }
+  .sx-stack .sx-table thead { display: none; }
+  .sx-stack .sx-table,
+  .sx-stack .sx-table tbody,
+  .sx-stack .sx-table tr,
+  .sx-stack .sx-table td { display: block; width: 100%; }
+  .sx-stack .sx-table tr {
+    margin-bottom: var(--sx-space-4);
+    padding: var(--sx-space-4);
+    background: var(--sx-surface);
+    border: 1px solid var(--sx-border);
+    border-radius: var(--sx-radius-lg);
+    box-shadow: var(--sx-shadow-sm);
+  }
+  .sx-stack .sx-table td {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--sx-space-3);
+    padding: 6px 0;
+    border: none;
+    text-align: right;
+  }
+  .sx-stack .sx-table td::before {
+    content: attr(data-label);
+    font-size: var(--sx-text-xs);
+    font-weight: var(--sx-weight-semibold);
+    text-transform: uppercase;
+    color: var(--sx-muted);
+    text-align: left;
+  }
+}
+
+/* ----- Status pills (iisang kulay bawat order status sa buong site) ----- */
+.sx-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  font-size: var(--sx-text-xs);
+  font-weight: var(--sx-weight-bold);
+  text-transform: capitalize;
+  white-space: nowrap;
+  border-radius: var(--sx-radius-pill);
+  background: var(--sx-surface-alt);
+  color: var(--sx-muted);
+}
+.sx-pill::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.sx-pill-pending   { background: var(--sx-status-pending-bg);   color: var(--sx-status-pending); }
+.sx-pill-preparing { background: var(--sx-status-preparing-bg); color: var(--sx-status-preparing); }
+.sx-pill-shipped   { background: var(--sx-status-shipped-bg);   color: var(--sx-status-shipped); }
+.sx-pill-delivered { background: var(--sx-status-delivered-bg); color: var(--sx-status-delivered); }
+.sx-pill-completed { background: var(--sx-status-completed-bg); color: var(--sx-status-completed); }
+.sx-pill-cancelled { background: var(--sx-status-cancelled-bg); color: var(--sx-status-cancelled); }
+
+/* ----- Empty state ----- */
+.sx-empty {
+  padding: var(--sx-space-8) var(--sx-space-4);
+  text-align: center;
+  color: var(--sx-muted);
+}
+.sx-empty i { display: block; margin-bottom: var(--sx-space-4); font-size: 2.5rem; color: var(--sx-border); }
+.sx-empty h3 { margin: 0 0 var(--sx-space-2); font-size: var(--sx-text-lg); font-weight: var(--sx-weight-bold); color: var(--sx-dark); }
+
+/* ----- Reduced motion ----- */
+@media (prefers-reduced-motion: reduce) {
+  .sx-btn,
+  .sx-btn-icon,
+  .sx-card-hover,
+  .sx-chip,
+  .sx-wordmark { transition: none; }
+  .sx-btn:hover,
+  .sx-card-hover:hover { transform: none; }
 }
