@@ -10,7 +10,8 @@ $email = $_GET['email'] ?? '';
 $error = '';
 $success = '';
 $user = null;
-$min_length = 8; // Inirerekomenda para sa validation
+$min_length = 10; // pareho sa register.php
+$password_regex = '/^(?=.*[A-Za-z])(?=.*\d)(?=.*[\W_]).{10,}$/'; // letra + numero + special, 10+ chars
 
 // --- Initial Token and Expiry Validation ---
 if (empty($token) || empty($email)) {
@@ -46,8 +47,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($error) && $user) {
         $error = "Please fill in all fields.";
     } elseif ($new_password !== $confirm_password) {
         $error = "Passwords do not match.";
-    } elseif (strlen($new_password) < $min_length) {
-        $error = "Password must be at least {$min_length} characters long.";
+    } elseif (!preg_match($password_regex, $new_password)) {
+        $error = "Password must be at least {$min_length} characters long and include letters, numbers, and special characters.";
     } else {
         try {
             $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
@@ -58,7 +59,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($error) && $user) {
             ");
             $update->execute([':password' => $hashed_password, ':id' => $user['id']]);
 
-            $success = "Password reset successful. You can now <a href='login.php' class='alert-link fw-bold'>login</a>.";
+            $success = "Your password has been reset. You can now log in with your new password.";
             $user = null; // Prevent form from showing
         } catch (PDOException $e) {
             error_log("Password Update Error: " . $e->getMessage());
@@ -67,130 +68,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($error) && $user) {
     }
 }
 ?>
+<?php
+require_once __DIR__ . '/includes/auth_layout.php';
+sx_auth_start('Reset password', '/sweepxpress/login.php', 'Back to login');
+?>
+            <h1>Set a new password</h1>
+            <p class="sx-auth-sub">Choose a strong password you haven't used before.</p>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Set New Password | SweepXpress</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <style>
-        body {
-            background: linear-gradient(135deg, #f0f4f8 0%, #d9e2ec 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-family: 'Poppins', sans-serif;
-        }
-        .card {
-            border: none;
-            border-radius: 20px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-        }
-        .btn-primary {
-            background: linear-gradient(90deg, #007bff, #6610f2);
-            border: none;
-            border-radius: 10px;
-            transition: 0.3s;
-        }
-        .btn-primary:hover {
-            opacity: 0.9;
-            transform: scale(1.02);
-        }
-        .form-control {
-            border-radius: 10px;
-            padding: 10px 12px;
-        }
-        /* Style for the icon button inside the input group */
-        .input-group-text {
-            cursor: pointer;
-            background: #fff;
-            border-left: none;
-        }
-    </style>
-</head>
-<body>
+            <?php if ($error): ?>
+                <div class="sx-alert sx-alert-error" role="alert"><i class="fa-solid fa-circle-exclamation"></i><div><?= htmlspecialchars($error) ?></div></div>
+            <?php endif; ?>
 
-<div class="container">
-    <div class="row justify-content-center">
-        <div class="col-md-6 col-lg-5">
-            <div class="card p-4 p-md-5 bg-white">
-                <div class="text-center mb-4">
-                    <img src="https://cdn-icons-png.flaticon.com/512/3064/3064197.png" width="70" alt="Lock Icon">
-                    <h2 class="mt-3">Reset Password</h2>
-                    <p class="text-muted">Enter your new password below (min. <?= $min_length ?> characters).</p>
-                </div>
-
-                <?php if ($error): ?>
-                    <div class="alert alert-danger text-center"><?= htmlspecialchars($error) ?></div>
-                <?php endif; ?>
-
-                <?php if ($success): ?>
-                    <div class="alert alert-success text-center"><?= $success ?></div>
-                    <div class="text-center mt-3">
-                        <a href="login.php" class="btn btn-outline-secondary">Go to Login Page</a>
-                    </div>
-                <?php elseif (empty($error) && $user): ?>
-                    <form method="POST">
-                        <div class="mb-3">
-                            <label for="new_password" class="form-label fw-semibold">New Password</label>
-                            <div class="input-group">
-                                <input type="password" class="form-control" id="new_password" name="new_password" minlength="<?= $min_length ?>" required>
-                                <span class="input-group-text" id="togglePassword1">
-                                    <i class="fa fa-eye" aria-hidden="true"></i>
-                                </span>
-                            </div>
+            <?php if ($success): ?>
+                <div class="sx-alert sx-alert-success" role="status"><i class="fa-solid fa-circle-check"></i><div><?= htmlspecialchars($success) ?></div></div>
+                <a href="/sweepxpress/login.php" class="sx-btn sx-btn-dark sx-btn-lg sx-btn-block sx-btn-arrow">
+                    Go to login <span class="sx-btn-icon"><i class="fa-solid fa-arrow-right"></i></span>
+                </a>
+            <?php elseif (empty($error) && $user): ?>
+                <form method="POST" id="resetForm">
+                    <div class="sx-field">
+                        <label class="sx-label" for="new_password">New password</label>
+                        <div class="sx-pass">
+                            <input type="password" class="sx-input" id="new_password" name="new_password" minlength="<?= $min_length ?>" autocomplete="new-password" required aria-describedby="passRules">
+                            <button type="button" data-sx-toggle="new_password" aria-label="Show password"><i class="fa-solid fa-eye"></i></button>
                         </div>
-                        
-                        <div class="mb-3">
-                            <label for="confirm_password" class="form-label fw-semibold">Confirm Password</label>
-                            <div class="input-group">
-                                <input type="password" class="form-control" id="confirm_password" name="confirm_password" minlength="<?= $min_length ?>" required>
-                                <span class="input-group-text" id="togglePassword2">
-                                    <i class="fa fa-eye" aria-hidden="true"></i>
-                                </span>
-                            </div>
-                        </div>
-                        <button type="submit" class="btn btn-primary w-100 py-2">Reset Password</button>
-                    </form>
-                <?php else: ?>
-                    <div class="text-center mt-3">
-                        <a href="login.php" class="btn btn-outline-secondary">Go to Login Page</a>
+                        <ul class="sx-rules" id="passRules">
+                            <li data-rule="length"><i class="fa-regular fa-circle"></i> 10+ characters</li>
+                            <li data-rule="letter"><i class="fa-regular fa-circle"></i> A letter</li>
+                            <li data-rule="number"><i class="fa-regular fa-circle"></i> A number</li>
+                            <li data-rule="special"><i class="fa-regular fa-circle"></i> A special character</li>
+                        </ul>
                     </div>
-                <?php endif; ?>
-            </div>
-        </div>
-    </div>
-</div>
+                    <div class="sx-field">
+                        <label class="sx-label" for="confirm_password">Confirm new password</label>
+                        <div class="sx-pass">
+                            <input type="password" class="sx-input" id="confirm_password" name="confirm_password" minlength="<?= $min_length ?>" autocomplete="new-password" required>
+                            <button type="button" data-sx-toggle="confirm_password" aria-label="Show password"><i class="fa-solid fa-eye"></i></button>
+                        </div>
+                        <span class="sx-error" id="matchError" hidden>Passwords do not match.</span>
+                    </div>
+                    <button type="submit" class="sx-btn sx-btn-dark sx-btn-lg sx-btn-block"><i class="fa-solid fa-key"></i> Reset password</button>
+                </form>
+            <?php else: ?>
+                <a href="/sweepxpress/forgot_password.php" class="sx-btn sx-btn-dark sx-btn-lg sx-btn-block">Request a new link</a>
+                <p class="sx-auth-foot"><a href="/sweepxpress/login.php">Back to login</a></p>
+            <?php endif; ?>
 
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        // Function to handle toggling for a specific field
-        function setupPasswordToggle(toggleId, inputId) {
-            const toggle = document.getElementById(toggleId);
-            const input = document.getElementById(inputId);
-            
-            toggle.addEventListener('click', function() {
-                // Toggle the type attribute
-                const type = input.getAttribute('type') === 'password' ? 'text' : 'password';
-                input.setAttribute('type', type);
-                
-                // Toggle the eye icon (fa-eye <-> fa-eye-slash)
-                this.querySelector('i').classList.toggle('fa-eye-slash');
-                this.querySelector('i').classList.toggle('fa-eye');
-            });
-        }
+document.addEventListener('DOMContentLoaded', function () {
+    sxPasswordToggles();
+    sxPasswordRules(document.getElementById('new_password'), document.getElementById('passRules'));
 
-        // Setup for New Password field
-        setupPasswordToggle('togglePassword1', 'new_password');
-
-        // Setup for Confirm Password field
-        setupPasswordToggle('togglePassword2', 'confirm_password');
-    });
+    const form = document.getElementById('resetForm');
+    if (!form) return;
+    const pass = document.getElementById('new_password');
+    const confirmPass = document.getElementById('confirm_password');
+    const matchError = document.getElementById('matchError');
+    const check = () => {
+        const mismatch = confirmPass.value !== '' && confirmPass.value !== pass.value;
+        matchError.hidden = !mismatch;
+        confirmPass.setCustomValidity(mismatch ? 'Passwords do not match.' : '');
+    };
+    pass.addEventListener('input', check);
+    confirmPass.addEventListener('input', check);
+    form.addEventListener('submit', () => { form.querySelector('button[type="submit"]').disabled = true; });
+});
 </script>
-
-</body>
-</html>
+<?php sx_auth_end(); ?>

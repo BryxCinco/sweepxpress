@@ -160,6 +160,92 @@ function sxBuyNow(productId, btn) {
 }
 
 /* -------------------------------
+   Auth helpers (login, register, reset password)
+   ------------------------------- */
+
+// 6 na OTP box → isang hidden input. Sumusuporta sa pag-paste ng buong code.
+function sxOtpBoxes(container, hiddenInput, submitBtn) {
+    if (!container || !hiddenInput) return;
+    const boxes = Array.from(container.querySelectorAll('input'));
+
+    const sync = () => {
+        const code = boxes.map(b => b.value).join('');
+        hiddenInput.value = code;
+        if (submitBtn) submitBtn.disabled = code.length !== boxes.length;
+    };
+
+    const fill = (from, digits) => {
+        digits.split('').forEach((d, i) => { if (boxes[from + i]) boxes[from + i].value = d; });
+        const next = Math.min(from + digits.length, boxes.length - 1);
+        boxes[next].focus();
+        sync();
+    };
+
+    boxes.forEach((box, i) => {
+        box.addEventListener('input', () => {
+            const digits = box.value.replace(/\D/g, '');
+            box.value = '';
+            if (digits) fill(i, digits); else sync();
+        });
+        box.addEventListener('keydown', (e) => {
+            if (e.key === 'Backspace' && !box.value && i > 0) {
+                boxes[i - 1].value = '';
+                boxes[i - 1].focus();
+                sync();
+                e.preventDefault();
+            } else if (e.key === 'ArrowLeft' && i > 0) {
+                boxes[i - 1].focus();
+            } else if (e.key === 'ArrowRight' && i < boxes.length - 1) {
+                boxes[i + 1].focus();
+            }
+        });
+        box.addEventListener('paste', (e) => {
+            const digits = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '').slice(0, boxes.length);
+            if (!digits) return;
+            e.preventDefault();
+            fill(i, digits);
+        });
+    });
+
+    boxes[0].focus();
+    sync();
+}
+
+// Mga button na nagpapakita/nagtatago ng password: <button data-sx-toggle="input-id">
+function sxPasswordToggles(scope = document) {
+    scope.querySelectorAll('[data-sx-toggle]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const input = document.getElementById(btn.dataset.sxToggle);
+            if (!input) return;
+            const show = input.type === 'password';
+            input.type = show ? 'text' : 'password';
+            btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+            btn.querySelector('i').className = show ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye';
+        });
+    });
+}
+
+// Live na checklist ng password rules: <li data-rule="length|letter|number|special">
+function sxPasswordRules(input, list) {
+    if (!input || !list) return;
+    const tests = {
+        length:  v => v.length >= 10,
+        letter:  v => /[A-Za-z]/.test(v),
+        number:  v => /\d/.test(v),
+        special: v => /[\W_]/.test(v),
+    };
+    const update = () => {
+        list.querySelectorAll('[data-rule]').forEach(li => {
+            const ok = tests[li.dataset.rule](input.value);
+            li.classList.toggle('is-met', ok);
+            li.querySelector('i').className = ok ? 'fa-solid fa-circle-check' : 'fa-regular fa-circle';
+        });
+    };
+    input.addEventListener('input', update);
+    update();
+}
+
+/* -------------------------------
    Sidebar Toggle
    ------------------------------- */
 document.addEventListener("DOMContentLoaded", () => {

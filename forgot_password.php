@@ -4,6 +4,7 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/email_config.php';
 
 $message = '';
+$message_type = '';          // 'error' o 'success' (dati: hinuhulaan mula sa Bootstrap class sa HTML)
 $form_was_submitted = false;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -11,7 +12,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = trim($_POST['email'] ?? '');
 
     if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $message = '<div class="alert alert-danger text-center">Please enter a valid email address.</div>';
+        $message = 'Please enter a valid email address.';
+        $message_type = 'error';
     } else {
         $stmt = $pdo->prepare("SELECT id, reset_token_expiry FROM users WHERE email = ? LIMIT 1");
         $stmt->execute([$email]);
@@ -60,88 +62,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         // Generic success message for security
-        $message = '<div class="alert alert-success text-center">
-            If your email is registered, a password reset link has been sent. Please check your inbox or spam folder.
-        </div>';
+        $message = 'If your email is registered, a password reset link has been sent. Please check your inbox or spam folder.';
+        $message_type = 'success';
     }
 }
 ?>
+<?php
+require_once __DIR__ . '/includes/auth_layout.php';
+sx_auth_start('Forgot password', '/sweepxpress/login.php', 'Back to login');
+?>
+            <h1>Forgot your password?</h1>
+            <p class="sx-auth-sub">Enter your account email and we'll send you a link to set a new password.</p>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Forgot Password | SweepXpress</title>
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-<style>
-    body {
-        background: linear-gradient(135deg, #f0f4f8 0%, #d9e2ec 100%);
-        min-height: 100vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-family: 'Poppins', sans-serif;
-    }
-    .card {
-        border: none;
-        border-radius: 20px;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-    }
-    .btn-primary {
-        background: linear-gradient(90deg, #007bff, #6610f2);
-        border: none;
-        border-radius: 10px;
-        transition: 0.3s;
-    }
-    .btn-primary:hover {
-        opacity: 0.9;
-        transform: scale(1.02);
-    }
-    .form-control {
-        border-radius: 10px;
-        padding: 10px 12px;
-    }
-</style>
-</head>
-<body>
-
-<div class="container">
-    <div class="row justify-content-center">
-        <div class="col-md-6 col-lg-5">
-            <div class="card p-4 p-md-5 bg-white">
-                <div class="text-center mb-4">
-                    <img src="https://cdn-icons-png.flaticon.com/512/3064/3064197.png" width="70" alt="Lock Icon">
-                    <h3 class="mt-3">Forgot Password?</h3>
-                    <p class="text-muted mb-3">Enter your email to receive a reset link.</p>
+            <?php if ($message): ?>
+                <div class="sx-alert sx-alert-<?= $message_type === 'error' ? 'error' : 'success' ?>" role="<?= $message_type === 'error' ? 'alert' : 'status' ?>">
+                    <i class="fa-solid <?= $message_type === 'error' ? 'fa-circle-exclamation' : 'fa-envelope-circle-check' ?>"></i><div><?= htmlspecialchars($message) ?></div>
                 </div>
+            <?php endif; ?>
 
-                <?= $message; ?>
-
-                <?php if (!$form_was_submitted || strpos($message, 'danger') !== false): ?>
-                <form method="post">
-                    <div class="mb-3">
-                        <label for="email_input" class="form-label fw-semibold">Email Address</label>
-                        <input 
-                            type="email" 
-                            class="form-control" 
-                            id="email_input" 
-                            name="email" 
-                            placeholder="your-email@example.com" 
-                            required
-                        >
+            <?php if (!$form_was_submitted || $message_type === 'error'): ?>
+                <form method="post" id="forgotForm">
+                    <div class="sx-field">
+                        <label class="sx-label" for="email_input">Email address</label>
+                        <input type="email" class="sx-input" id="email_input" name="email" placeholder="you@example.com" autocomplete="email" required
+                               value="<?= htmlspecialchars($_POST['email'] ?? '') ?>">
                     </div>
-                    <div class="d-grid gap-2">
-                        <button type="submit" class="btn btn-primary w-100 py-2">Send Reset Link</button>
-                        <a href="login.php" class="btn btn-link text-decoration-none">Back to Login</a>
-                    </div>
+                    <button type="submit" class="sx-btn sx-btn-dark sx-btn-lg sx-btn-block">
+                        <i class="fa-solid fa-paper-plane"></i> Send reset link
+                    </button>
                 </form>
-                <?php endif; ?>
-            </div>
-        </div>
-    </div>
-</div>
+            <?php else: ?>
+                <a href="/sweepxpress/login.php" class="sx-btn sx-btn-outline sx-btn-lg sx-btn-block">Back to login</a>
+            <?php endif; ?>
 
-</body>
-</html>
+            <p class="sx-auth-foot">Remembered it? <a href="/sweepxpress/login.php">Log in</a></p>
 
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const form = document.getElementById('forgotForm');
+    if (form) form.addEventListener('submit', () => { form.querySelector('button').disabled = true; });
+});
+</script>
+<?php sx_auth_end(); ?>
