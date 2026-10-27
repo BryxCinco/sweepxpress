@@ -342,7 +342,7 @@ body {
 
             <div class="btn-action-group">
                 <a href="cron_stock_alert.php" target="_blank" class="btn-import" style="border-color: #eab308; color: #b45309; background: #fefce8;" title="Check for low stock and send email">
-                    <i class="fas fa-robot"></i> AI Check
+                    <i class="fas fa-bell"></i> Stock Check
                 </a>
 
                 <a href="import_csv.php" class="btn-import"><i class="fas fa-file-import"></i> Import CSV</a>

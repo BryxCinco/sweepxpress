@@ -31,7 +31,7 @@ $timeline = [
     ['year' => 2020, 'title' => 'Foundation', 'desc' => 'Started with a small warehouse and big dreams'],
     ['year' => 2021, 'title' => 'Expansion', 'desc' => '500+ products added, nationwide delivery launched'],
     ['year' => 2022, 'title' => 'Eco Initiative', 'desc' => 'Introduced sustainable product line'],
-    ['year' => 2023, 'title' => 'Digital Transform', 'desc' => 'Launched AI-powered recommendation engine'],
+    ['year' => 2023, 'title' => 'Digital Transform', 'desc' => 'Launched online ordering and real-time inventory tracking'],
     ['year' => 2024, 'title' => 'Industry Leader', 'desc' => 'Recognized as top cleaning supplier in Philippines'],
     ['year' => 2025, 'title' => 'Innovation Hub', 'desc' => 'Opening state-of-the-art distribution center']
 ];
