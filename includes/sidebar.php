@@ -1,335 +1,302 @@
 <?php
-// Slide-out sidebar, included only when logged in.
+// Slide-out sidebar, included only when logged in (galing sa header.php,
+// kaya available dito ang $profileImage, $displayName at $sxRoleLabel).
+// Pareho ang scope nito sa page (hal. cart.php), kaya lahat ng variable dito
+// ay may "$sx" prefix para hindi ma-overwrite ang $items, $icon, $label ng page.
+
+// Path ng kasalukuyang page na relative sa /sweepxpress/, hal. "admin/order_details.php"
+$sxPath = preg_replace('#^.*?/sweepxpress/#', '', $_SERVER['SCRIPT_NAME'] ?? '');
+
+// "active" kapag tugma ang page sa alinman sa mga pattern ng isang menu item
+$sxNavActive = function (array $patterns) use ($sxPath) {
+    foreach ($patterns as $p) {
+        if (fnmatch($p, $sxPath)) return ' active';
+    }
+    return '';
+};
+
+if (is_admin()) {
+    $sxNav = [
+        'Operations' => [
+            ['admin/dashboard.php', 'fa-gauge-high', 'Dashboard', ['admin/dashboard.php']],
+            ['admin/products.php', 'fa-box', 'Products', ['admin/products.php', 'admin/add_product.php', 'admin/edit_product.php', 'admin/import_csv.php']],
+            ['admin/allorders.php', 'fa-bag-shopping', 'Orders', ['admin/allorders.php', 'admin/order*', 'admin/orders*', 'admin/adminreceipt.php']],
+            ['admin/deliveries.php', 'fa-truck-fast', 'Deliveries', ['admin/deliveries*']],
+            ['admin/inventory.php', 'fa-warehouse', 'Inventory', ['admin/inventory*', 'admin/stock_*', 'admin/product_history.php']],
+            ['admin/customer_management.php', 'fa-users', 'Customers', ['admin/customer_management.php', 'admin/user_actions.php', 'admin/edit_role.php', 'admin/view_logs.php']],
+        ],
+        'Insights' => [
+            ['admin/reports.php', 'fa-chart-line', 'Reports & Analytics', ['admin/reports.php']],
+            ['admin/admin_contact.php', 'fa-envelope-open-text', 'Messages', ['admin/admin_contact.php']],
+        ],
+        'Account' => [
+            ['admin/settings_admin.php', 'fa-gear', 'Settings', ['admin/settings_admin.php']],
+            ['about.php', 'fa-circle-info', 'About Us', ['about.php', 'admin/about_edit.php']],
+        ],
+    ];
+} else {
+    $sxNav = [
+        'Shop' => [
+            ['index.php', 'fa-store', 'Shop', ['index.php', 'product.php']],
+            ['cart.php', 'fa-cart-shopping', 'Cart', ['cart.php', 'checkout.php', 'buy_now_checkout.php', 'business/purchaseorder.php']],
+            ['customers/my_orders.php', 'fa-receipt', 'My Orders', ['customers/my_orders.php', 'customers/order_details.php', 'customers/UserReceipt.php']],
+        ],
+        'Account' => [
+            ['customers/settings_customer.php', 'fa-user-gear', 'Settings', ['customers/settings_customer.php']],
+            ['about.php', 'fa-circle-info', 'About Us', ['about.php']],
+            ['contact.php', 'fa-envelope', 'Contact', ['contact.php']],
+        ],
+    ];
+}
 ?>
-<div id="sidebar" class="sidebar">
-    <!-- Close Button -->
-    <button class="sidebar-close" id="closeSidebar" aria-label="Close sidebar">
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-            <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        </svg>
-    </button>
+<aside id="sidebar" class="sidebar" aria-label="Main menu">
+    <!-- Brand + close -->
+    <div class="sidebar-head">
+        <a href="<?= is_admin() ? '/sweepxpress/admin/dashboard.php' : '/sweepxpress/index.php' ?>" class="sidebar-brand">
+            <span class="sx-logo-mark" aria-hidden="true">X</span>
+            <span class="sx-wordmark">Sweep<span class="sx-wordmark-x">X</span>press</span>
+        </a>
+        <button class="sidebar-close" id="closeSidebar" type="button" aria-label="Close sidebar">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    </div>
+
+    <!-- User -->
+    <div class="sidebar-user">
+        <img src="<?= $profileImage ?>" alt="">
+        <div>
+            <strong><?= h($displayName) ?></strong>
+            <span><?= $sxRoleLabel ?></span>
+        </div>
+    </div>
 
     <!-- Navigation -->
     <nav class="sidebar-nav">
-        <?php if (is_admin()): ?>
-            <!-- Admin Navigation -->
+        <?php foreach ($sxNav as $sxSection => $sxItems): ?>
             <div class="nav-section">
-                <a href="/sweepxpress/admin/dashboard.php" class="nav-card">
-                    <div class="nav-icon"><i class="bi bi-speedometer2"></i></div>
-                    <span class="nav-label">Dashboard</span>
-                </a>
-                <a href="/sweepxpress/admin/products.php" class="nav-card">
-                    <div class="nav-icon"><i class="bi bi-box-seam"></i></div>
-                    <span class="nav-label">Products</span>
-                </a>
-                <a href="/sweepxpress/admin/allorders.php" class="nav-card">
-                    <div class="nav-icon"><i class="bi bi-bag-check"></i></div>
-                    <span class="nav-label">Orders</span>
-                </a>
-                <a href="/sweepxpress/admin/deliveries.php" class="nav-card">
-                    <div class="nav-icon"><i class="bi bi-truck"></i></div>
-                    <span class="nav-label">Deliveries</span>
-                </a>
-                <a href="/sweepxpress/admin/inventory.php" class="nav-card">
-                    <div class="nav-icon"><i class="bi bi-archive"></i></div>
-                    <span class="nav-label">Inventory</span>
-                </a>
-                <a href="/sweepxpress/admin/customer_management.php" class="nav-card">
-                    <div class="nav-icon"><i class="bi bi-people"></i></div>
-                    <span class="nav-label">Customers</span>
-                </a>
+                <p class="nav-section-title"><?= $sxSection ?></p>
+                <?php foreach ($sxItems as [$sxHref, $sxIcon, $sxLabel, $sxPatterns]): ?>
+                    <?php $sxActive = $sxNavActive($sxPatterns); ?>
+                    <a href="/sweepxpress/<?= $sxHref ?>" class="nav-card<?= $sxActive ?>"<?= $sxActive ? ' aria-current="page"' : '' ?>>
+                        <span class="nav-icon"><i class="fa-solid <?= $sxIcon ?>"></i></span>
+                        <span class="nav-label"><?= h($sxLabel) ?></span>
+                    </a>
+                <?php endforeach; ?>
             </div>
-
-            <div class="section-divider"></div>
-
-            <div class="nav-section">
-                <a href="/sweepxpress/admin/reports.php" class="nav-card">
-                    <div class="nav-icon"><i class="bi bi-bar-chart-line"></i></div>
-                    <span class="nav-label">Reports & Analytics</span>
-                </a>
-                <a href="/sweepxpress/admin/admin_contact.php" class="nav-card">
-                    <div class="nav-icon"><i class="bi bi-envelope-paper"></i></div>
-                    <span class="nav-label">Messages</span>
-                </a>
-            </div>
-
-            <div class="section-divider"></div>
-
-            <div class="nav-section">
-                <a href="/sweepxpress/admin/settings_admin.php" class="nav-card">
-                    <div class="nav-icon"><i class="bi bi-gear"></i></div>
-                    <span class="nav-label">Settings</span>
-                </a>
-                <a href="/sweepxpress/about.php" class="nav-card">
-                    <div class="nav-icon"><i class="bi bi-info-circle"></i></div>
-                    <span class="nav-label">About Us</span>
-                </a>
-            </div>
-
-        <?php else: ?>
-            <!-- Customer Navigation -->
-            <div class="nav-section">
-                <a href="/sweepxpress/index.php" class="nav-card">
-                    <div class="nav-icon"><i class="bi bi-house-door"></i></div>
-                    <span class="nav-label">Home</span>
-                </a>
-                <a href="/sweepxpress/customers/my_orders.php" class="nav-card">
-                    <div class="nav-icon"><i class="bi bi-receipt-cutoff"></i></div>
-                    <span class="nav-label">My Orders</span>
-                </a>
-            </div>
-
-            <div class="section-divider"></div>
-
-            <div class="nav-section">
-                <a href="/sweepxpress/customers/settings_customer.php" class="nav-card">
-                    <div class="nav-icon"><i class="bi bi-person-gear"></i></div>
-                    <span class="nav-label">Settings</span>
-                </a>
-                <a href="/sweepxpress/about.php" class="nav-card">
-                    <div class="nav-icon"><i class="bi bi-info-circle"></i></div>
-                    <span class="nav-label">About Us</span>
-                </a>
-                <a href="/sweepxpress/contact.php" class="nav-card">
-                    <div class="nav-icon"><i class="bi bi-envelope"></i></div>
-                    <span class="nav-label">Contact</span>
-                </a>
-            </div>
-        <?php endif; ?>
+        <?php endforeach; ?>
+        <?php unset($sxSection, $sxItems, $sxHref, $sxIcon, $sxLabel, $sxPatterns, $sxActive); ?>
     </nav>
-</div>
 
-<!-- Overlay for mobile -->
+    <!-- Footer -->
+    <div class="sidebar-foot">
+        <a href="/sweepxpress/logout.php" class="sx-btn sx-btn-outline sx-btn-block">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i> Logout
+        </a>
+    </div>
+</aside>
+
+<!-- Overlay -->
 <div id="sidebarOverlay" class="sidebar-overlay"></div>
 
 <style>
-/* SIDEBAR SHELL */
+/* ===== SIDEBAR (Phase 9a) — tokens, handa sa dark mode ===== */
 .sidebar {
     position: fixed;
     top: 0;
-    left: -320px;
-    width: 320px;
+    left: 0;
+    z-index: 1100;                  /* nasa ibabaw ng navbar (1090) para kita ang brand at close */
+    width: min(300px, 85vw);
     height: 100vh;
-    background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
-    transition: left 0.35s cubic-bezier(0.22, 1, 0.36, 1);
-    z-index: 1050;
+    height: 100dvh;
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
-    overflow-x: hidden;
-    box-shadow: 8px 0 40px rgba(0, 0, 0, 0.08);
+    background: var(--sx-surface);
+    border-right: 1px solid var(--sx-border-light);
+    box-shadow: var(--sx-shadow-lg);
+    color: var(--sx-text);
+    overflow: hidden;
+    transform: translateX(-105%);
+    transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+    /* Neutralize ang lumang .sidebar rules sa style.css */
+    padding-top: 0;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
 }
+.sidebar::before { content: none; }
 .sidebar.active {
-    left: 0;
+    transform: translateX(0);
+    box-shadow: var(--sx-shadow-lg);
 }
 
-/* Scrollbar */
-.sidebar::-webkit-scrollbar {
-    width: 5px;
+/* Brand + close */
+.sidebar-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sx-space-3);
+    padding: var(--sx-space-5) var(--sx-space-5) var(--sx-space-4);
 }
-.sidebar::-webkit-scrollbar-track {
-    background: transparent;
+.sidebar-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-size: 1.25rem;
+    text-decoration: none;
+    margin-left: 0;                 /* lumang "nav a" rule */
 }
-.sidebar::-webkit-scrollbar-thumb {
-    background: rgba(148, 163, 184, 0.3);
-    border-radius: 10px;
-}
-.sidebar::-webkit-scrollbar-thumb:hover {
-    background: rgba(148, 163, 184, 0.5);
-}
-
-/* CLOSE BUTTON */
 .sidebar-close {
-    position: absolute;
-    top: 24px;
-    right: 24px;
+    display: inline-grid;
+    place-items: center;
     width: 36px;
     height: 36px;
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    flex-shrink: 0;
+    border: 1px solid var(--sx-border-light);
+    border-radius: var(--sx-radius-sm);
+    background: var(--sx-surface-alt);
+    color: var(--sx-muted);
     cursor: pointer;
-    color: #64748b;
-    transition: all 0.2s ease;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-    z-index: 10;
+    transition: transform var(--sx-transition), color var(--sx-transition), background var(--sx-transition);
 }
 .sidebar-close:hover {
-    background: #f8fafc;
-    border-color: #cbd5e1;
-    color: #334155;
+    color: var(--sx-dark);
+    background: var(--sx-surface);
     transform: rotate(90deg);
 }
-.sidebar-close:active {
-    transform: rotate(90deg) scale(0.95);
+
+/* User card */
+.sidebar-user {
+    display: flex;
+    align-items: center;
+    gap: var(--sx-space-3);
+    margin: 0 var(--sx-space-5) var(--sx-space-4);
+    padding: var(--sx-space-3);
+    border-radius: var(--sx-radius-lg);
+    background: var(--sx-surface-alt);
+    border: 1px solid var(--sx-border-light);
+}
+.sidebar-user img {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid var(--sx-surface);
+    box-shadow: 0 0 0 2px var(--sx-accent);
+}
+.sidebar-user strong {
+    display: block;
+    font-size: var(--sx-text-sm);
+    color: var(--sx-dark);
+    line-height: 1.2;
+}
+.sidebar-user span {
+    font-size: var(--sx-text-xs);
+    color: var(--sx-muted);
 }
 
-/* NAV CONTENT */
+/* Navigation */
 .sidebar-nav {
-    padding: 80px 20px 24px;
     flex: 1;
+    overflow-y: auto;
+    padding: 0 var(--sx-space-4) var(--sx-space-4);
 }
-.nav-section {
-    margin-bottom: 20px;
+.sidebar-nav::-webkit-scrollbar { width: 5px; }
+.sidebar-nav::-webkit-scrollbar-thumb {
+    background: var(--sx-border);
+    border-radius: 10px;
+}
+.nav-section + .nav-section { margin-top: var(--sx-space-4); }
+.nav-section-title {
+    margin: 0 0 var(--sx-space-2);
+    padding: 0 var(--sx-space-3);
+    font-size: 0.7rem;
+    font-weight: var(--sx-weight-bold);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--sx-muted);
 }
 .nav-card {
+    position: relative;
     display: flex;
     align-items: center;
-    padding: 16px 18px;
-    margin-bottom: 8px;
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 14px;
+    gap: var(--sx-space-3);
+    margin: 0 0 2px;
+    padding: 10px var(--sx-space-3);
+    border-radius: var(--sx-radius-md);
+    color: var(--sx-text);
+    font-size: var(--sx-text-sm);
+    font-weight: var(--sx-weight-medium);
     text-decoration: none;
-    color: #334155;
-    font-size: 15px;
-    font-weight: 500;
-    transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
-    position: relative;
-    overflow: hidden;
-}
-.nav-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 4px;
-    height: 100%;
-    background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
-    transform: scaleY(0);
-    transition: transform 0.25s ease;
+    transition: background var(--sx-transition), color var(--sx-transition);
 }
 .nav-card:hover {
-    background: #ffffff;
-    border-color: #3b82f6;
-    transform: translateY(-2px);
-    box-shadow: 0 8px 20px rgba(59, 130, 246, 0.15);
+    background: var(--sx-surface-alt);
+    color: var(--sx-dark);
 }
-.nav-card:hover::before {
-    transform: scaleY(1);
+.nav-icon {
+    display: inline-grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    border-radius: var(--sx-radius-sm);
+    background: var(--sx-surface-alt);
+    color: var(--sx-muted);
+    font-size: 0.95rem;
+    transition: background var(--sx-transition), color var(--sx-transition);
 }
-.nav-card:hover .nav-icon {
-    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-    color: #ffffff;
-    transform: scale(1.05);
-}
-.nav-card:hover .nav-label {
-    color: #1e40af;
-}
+.nav-card:hover .nav-icon { color: var(--sx-primary); }
+.nav-label { flex: 1; white-space: nowrap; }
 
-/* Active state */
+/* Active: navy na pill + emerald na bar sa kaliwa */
 .nav-card.active {
-    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-    border-color: #3b82f6;
-    box-shadow: 0 4px 16px rgba(59, 130, 246, 0.12);
+    background: var(--sx-primary-soft);
+    color: var(--sx-primary);
+    font-weight: var(--sx-weight-semibold);
 }
 .nav-card.active::before {
-    transform: scaleY(1);
+    content: "";
+    position: absolute;
+    left: -16px;
+    top: 8px;
+    bottom: 8px;
+    width: 4px;
+    border-radius: 0 4px 4px 0;
+    background: var(--sx-accent);
 }
 .nav-card.active .nav-icon {
-    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-    color: #ffffff;
-}
-.nav-card.active .nav-label {
-    color: #1e40af;
-    font-weight: 600;
+    background: var(--sx-primary);
+    color: var(--sx-on-primary);
 }
 
-.nav-icon {
-    width: 42px;
-    height: 42px;
-    min-width: 42px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #f1f5f9;
-    border-radius: 11px;
-    margin-right: 14px;
-    color: #64748b;
-    font-size: 20px;
-    transition: all 0.25s ease;
-}
-.nav-icon i { display:flex; }
-
-.nav-label {
-    flex: 1;
-    font-size: 15px;
-    letter-spacing: -0.01em;
-    transition: all 0.2s ease;
-    white-space: nowrap;
+/* Footer */
+.sidebar-foot {
+    padding: var(--sx-space-4) var(--sx-space-5) var(--sx-space-5);
+    border-top: 1px solid var(--sx-border-light);
 }
 
-.section-divider {
-    height: 1px;
-    background: linear-gradient(90deg, transparent 0%, #e2e8f0 50%, transparent 100%);
-    margin: 20px 0;
-}
-
-/* OVERLAY */
+/* Overlay */
 .sidebar-overlay {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100vh;
-    background: rgba(0, 0, 0, 0.4);
-    backdrop-filter: blur(2px);
+    inset: 0;
+    z-index: 1095;
+    background: rgba(11, 23, 53, 0.45);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
     opacity: 0;
     visibility: hidden;
-    transition: all 0.35s ease;
-    z-index: 1040;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
 }
 .sidebar-overlay.active {
     opacity: 1;
     visibility: visible;
 }
 
-/* RESPONSIVE: show only partial width on mobile */
-@media (max-width: 768px) {
-    .sidebar {
-        width: 60vw;
-        max-width: 360px;
-        left: -100%;
-    }
-}
-@media (max-width: 480px) {
-    .sidebar {
-        width: 65vw;
-        max-width: 100%;
-    }
-    .sidebar-nav {
-        padding: 70px 16px 20px;
-    }
-    .nav-card {
-        padding: 14px 16px;
-    }
-    .nav-icon {
-        width: 38px;
-        height: 38px;
-        min-width: 38px;
-        margin-right: 12px;
-    }
-}
-
-/* Accessibility/reduced motion */
-.nav-card:focus {
-    outline: 2px solid #3b82f6;
-    outline-offset: 2px;
-}
-.nav-card:focus:not(:focus-visible) {
-    outline: none;
-}
 @media (prefers-reduced-motion: reduce) {
     .sidebar,
-    .nav-card,
     .sidebar-close,
-    .sidebar-overlay {
-        transition: none;
-    }
+    .sidebar-overlay,
+    .nav-card,
+    .nav-icon { transition: none; }
 }
 </style>
 
@@ -339,17 +306,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const overlay = document.getElementById('sidebarOverlay');
     const closeBtn = document.getElementById('closeSidebar');
     const burger = document.getElementById('sidebarToggle');
-    const navCards = document.querySelectorAll('.nav-card');
-    const currentPath = window.location.pathname;
 
-    // Keep your existing active link logic
-    navCards.forEach(card => {
-        const linkPath = card.getAttribute('href');
-        if (linkPath === currentPath || 
-            (currentPath.includes(linkPath) && linkPath !== 'sweepxpressindex.php')) {
-            card.classList.add('active');
-        }
-    });
+    // Ang "active" na menu item ay itinatakda na sa PHP sa itaas
 
     function openSidebar() {
         if (!sidebar || !overlay) return;

@@ -36,82 +36,118 @@ require_once __DIR__ . '/../config.php';
             overscroll-behavior-y: contain;
         }
 
-        /* ===== NAVBAR BASE ===== */
+        /* ===== NAVBAR (Phase 9a) — gumagamit ng tokens, handa sa dark mode ===== */
         .navbar {
             position: fixed;
             top: 0;
             left: 0;
             right: 0;
             z-index: 1090;
-            background: rgba(255, 255, 255, 0.96) !important;
-            backdrop-filter: blur(18px);
-            -webkit-backdrop-filter: blur(18px);
-            border-bottom: 1px solid rgba(15, 23, 42, 0.06);
-            padding-block: 0.8rem;
-            transition: all 0.25s ease;
-            box-shadow: 0 2px 16px rgba(15, 23, 42, 0.04);
+            background: color-mix(in srgb, var(--sx-surface) 88%, transparent) !important;
+            backdrop-filter: blur(18px) saturate(1.4);
+            -webkit-backdrop-filter: blur(18px) saturate(1.4);
+            border-bottom: 1px solid var(--sx-border-light);
+            padding-block: 0.75rem;
+            transition: padding 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
+        }
+        /* Manipis na brand gradient sa ilalim — lumalabas kapag nag-scroll */
+        .navbar::after {
+            content: "";
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: -1px;
+            height: 2px;
+            background: var(--sx-gradient-brand);
+            opacity: 0;
+            transition: opacity 0.25s ease;
         }
         .navbar-scrolled {
-            background: rgba(255, 255, 255, 0.99) !important;
-            box-shadow: 0 4px 24px rgba(15, 23, 42, 0.12);
+            padding-block: 0.5rem;
+            background: color-mix(in srgb, var(--sx-surface) 96%, transparent) !important;
+            box-shadow: var(--sx-shadow-md);
         }
+        .navbar-scrolled::after { opacity: 1; }
+        /* Neutralize ang lumang "nav a" rule sa style.css (margin-left + opacity sa hover) */
+        .navbar a { margin-left: 0; }
+        .navbar a:hover { opacity: 1; }
 
+        /* Brand: logo mark + gradient wordmark (.sx-logo-mark / .sx-wordmark sa style.css) */
         .navbar-brand {
-            font-size: 1.45rem;
-            font-weight: 800;
-            letter-spacing: -0.03em;
-            color: #0f172a !important;
             display: flex;
             align-items: center;
-            gap: 0.15rem;
+            gap: 0.6rem;
+            margin-right: 1rem;
+            font-size: 1.4rem;
             white-space: nowrap;
         }
-        /* LOGO: gradient wordmark (.sx-wordmark sa style.css) */
 
+        /* Mga link (guest) */
         .navbar-light .nav-link {
-            color: #334155 !important;
+            color: var(--sx-muted) !important;
             font-weight: 600;
             font-size: 0.93rem;
-            padding: 0.5rem 0.9rem !important;
-            border-radius: 999px;
-            transition: background 0.18s ease, color 0.18s ease;
+            padding: 0.5rem 1rem !important;
+            border-radius: var(--sx-radius-pill);
+            transition: background var(--sx-transition), color var(--sx-transition);
         }
         .navbar-light .nav-link:hover {
+            color: var(--sx-dark) !important;
+            background: var(--sx-surface-alt);
+        }
+        .navbar-light .nav-link.active {
             color: var(--sx-primary) !important;
-            background: color-mix(in srgb, var(--sx-primary) 8%, transparent);
+            background: var(--sx-primary-soft);
         }
 
-        /* Profile chip inside menu */
+        /* Profile chip (link papunta sa settings) */
         .profile-section {
             display: flex;
             align-items: center;
-            gap: 0.55rem;
-            padding: 0.35rem 0.8rem;
-            background: color-mix(in srgb, var(--sx-primary) 6%, transparent);
-            border-radius: 999px;
+            gap: 0.6rem;
+            padding: 0.3rem 1rem 0.3rem 0.3rem;
+            background: var(--sx-surface-alt);
+            border: 1px solid var(--sx-border-light);
+            border-radius: var(--sx-radius-pill);
+            text-decoration: none;
+            transition: background var(--sx-transition), border-color var(--sx-transition);
+        }
+        .profile-section:hover {
+            background: var(--sx-surface);
+            border-color: var(--sx-border);
         }
         .profile-img {
             width: 34px;
             height: 34px;
             border-radius: 50%;
             object-fit: cover;
-            border: 2px solid var(--sx-primary);
+            border: 2px solid var(--sx-surface);
+            box-shadow: 0 0 0 2px var(--sx-accent);
         }
         .navbar-text {
-            color: #1e293b !important;
-            font-weight: 600;
-            font-size: 0.9rem;
             margin: 0;
+            padding: 0;
+            color: var(--sx-dark) !important;
+            font-weight: 700;
+            font-size: 0.88rem;
+            line-height: 1.15;
+        }
+        .navbar-text small {
+            display: block;
+            font-size: 0.7rem;
+            font-weight: 500;
+            color: var(--sx-muted);
         }
 
-        /* Avatar button on top-right */
+        /* Avatar button on top-right (mobile) */
         .mobile-profile-avatar {
-            width: 38px;
-            height: 38px;
+            width: 40px;
+            height: 40px;
             border-radius: 50%;
             overflow: hidden;
-            border: 2px solid var(--sx-primary);
-            background: color-mix(in srgb, var(--sx-primary) 6%, transparent);
+            border: 2px solid var(--sx-surface);
+            box-shadow: 0 0 0 2px var(--sx-accent);
+            background: var(--sx-surface-alt);
             display: none; /* shown on mobile when logged in */
             align-items: center;
             justify-content: center;
@@ -125,80 +161,56 @@ require_once __DIR__ . '/../config.php';
             object-fit: cover;
         }
 
-        /* Cart */
-        .cart-link {
+        /* Icon buttons: cart, sidebar burger, guest menu */
+        .cart-link,
+        #sidebarToggle,
+        .navbar-toggler {
             position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 40px;
-            height: 40px;
-            background: color-mix(in srgb, var(--sx-primary) 6%, transparent);
-            border-radius: 50%;
-            transition: background 0.18s ease, transform 0.16s ease;
-        }
-        .cart-link:hover {
-            background: color-mix(in srgb, var(--sx-primary) 14%, transparent);
-            transform: translateY(-1px);
-        }
-        .cart-link i {
-            color: var(--sx-primary);
-            font-size: 1.2rem;
-        }
-        #cart-badge {
-            position: absolute;
-            top: -4px;
-            right: -4px;
-            min-width: 18px;
-            height: 18px;
-            padding-inline: 4px;
-            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-            border-radius: 999px;
-            font-size: 0.7rem;
-            font-weight: 700;
-            color: #fff;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 2px 8px rgba(239, 68, 68, 0.45);
-        }
-
-        /* Logout */
-        .btn-logout {
-            background: linear-gradient(135deg, var(--sx-primary) 0%, var(--sx-primary-light) 100%);
-            color: #ffffff !important;
-            border: none;
-            font-weight: 700;
-            font-size: 0.9rem;
-            padding: 0.55rem 1.6rem;
-            border-radius: 999px;
-            box-shadow: 0 3px 12px color-mix(in srgb, var(--sx-primary) 30%, transparent);
-        }
-
-        /* Sidebar burger (left) */
-        #sidebarToggle {
-            width: 40px;
-            height: 40px;
-            border-radius: 12px;
-            border: 2px solid color-mix(in srgb, var(--sx-primary) 22%, transparent);
-            background: color-mix(in srgb, var(--sx-primary) 6%, transparent);
-            color: var(--sx-primary);
-            font-size: 1.25rem;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            margin-right: 0.6rem;
+            width: 42px;
+            height: 42px;
+            padding: 0;
             flex-shrink: 0;
+            font-size: 1.05rem;
+            color: var(--sx-primary);
+            background: var(--sx-surface-alt);
+            border: 1px solid var(--sx-border-light);
+            border-radius: var(--sx-radius-md);
+            text-decoration: none;
+            box-shadow: none;
+            transition: background var(--sx-transition), border-color var(--sx-transition), transform var(--sx-transition);
         }
+        .cart-link:hover,
+        #sidebarToggle:hover,
+        .navbar-toggler:hover {
+            color: var(--sx-primary);
+            background: var(--sx-primary-soft);
+            border-color: color-mix(in srgb, var(--sx-primary) 20%, transparent);
+            transform: translateY(-1px);
+        }
+        #sidebarToggle { margin-right: 0.75rem; }
+        /* script.js: ang click sa icon ay hindi dapat ituring na "click sa labas" ng sidebar */
+        #sidebarToggle i,
+        .navbar-toggler i { pointer-events: none; }
 
-        .navbar-toggler {
-            border: none;
-            padding: 0.25rem 0.45rem;
-        }
-        .navbar-toggler-icon {
-            background-image:url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba(30,58,138,0.9)' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
-            width:1.4em;
-            height:1.4em;
+        #cart-badge {
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            min-width: 20px;
+            height: 20px;
+            padding-inline: 5px;
+            background: var(--sx-accent);
+            border: 2px solid var(--sx-surface);
+            border-radius: var(--sx-radius-pill);
+            font-size: 0.68rem;
+            font-weight: 800;
+            color: var(--sx-on-accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         /* ===== PULL TO REFRESH ===== */
@@ -280,23 +292,24 @@ require_once __DIR__ . '/../config.php';
             }
 
             .navbar-collapse {
-                margin-top:0.6rem;
-                padding:0.75rem 0.85rem;
-                background:#ffffff;
-                border-radius:14px;
-                box-shadow:0 12px 26px rgba(15,23,42,0.15);
+                margin-top: 0.75rem;
+                padding: 0.75rem;
+                background: var(--sx-surface);
+                border: 1px solid var(--sx-border-light);
+                border-radius: var(--sx-radius-lg);
+                box-shadow: var(--sx-shadow-lg);
             }
             .navbar-nav {
-                align-items:stretch !important;
-                gap:0.25rem;
+                align-items: stretch !important;
+                gap: 0.35rem;
             }
             .profile-section {
-                width:100%;
-                justify-content:flex-start;
+                width: 100%;
+                justify-content: flex-start;
             }
-            .btn-logout {
-                width:100%;
-                margin-top:0.4rem;
+            .navbar-nav .sx-btn {
+                width: 100%;
+                margin-top: 0.25rem;
             }
 
             /* Avatar visible on all logged-in pages */
@@ -307,11 +320,11 @@ require_once __DIR__ . '/../config.php';
             /* Brand truncates before icons are pushed off-screen */
             .navbar-brand {
                 flex: 1 1 auto;
+                min-width: 0;
                 max-width: calc(100% - 150px); /* left burger + right avatar/burger */
                 overflow: hidden;
-                text-overflow: ellipsis;
                 white-space: nowrap;
-                font-size: 1.35rem; /* Adjusted for smaller tablets/large phones */
+                font-size: 1.3rem; /* Adjusted for smaller tablets/large phones */
             }
 
             /* Right-side controls never shrink */
@@ -330,8 +343,14 @@ require_once __DIR__ . '/../config.php';
 
             /* *** CHANGE FOR SMALLER LOGO ON SMALL MOBILE SCREENS *** */
             .navbar-brand {
+                gap: 0.45rem;
                 font-size: 1.1rem; /* Made it "littler" for small mobile devices */
                 max-width: calc(100% - 130px);
+            }
+            .navbar-brand .sx-logo-mark {
+                width: 30px;
+                height: 30px;
+                font-size: 0.95rem;
             }
         }
     </style>
@@ -377,16 +396,25 @@ if (is_logged_in() && isset($_SESSION['user'])) {
     if (!empty($_SESSION['user']['profile_image'])) {
         // Add a cache-busting timestamp to the profile image URL
         $imagePath = h($_SESSION['user']['profile_image']);
-        $profileImage = $imagePath . '?' . time(); 
+        $profileImage = $imagePath . '?' . time();
     }
 }
+
+// Label ng role sa profile chip, at kung saan ito papunta.
+// "$sx" prefix: pareho ang scope ng header at ng page, kaya iwas-banggaan sa mga variable ng page.
+$sxRoleLabels = ['admin' => 'Administrator', 'business' => 'Business account', 'supplier' => 'Supplier', 'customer' => 'Customer'];
+$sxRoleLabel = $sxRoleLabels[$_SESSION['user']['role'] ?? ''] ?? 'Customer';
+$sxSettingsUrl = is_admin() ? '/sweepxpress/admin/settings_admin.php' : '/sweepxpress/customers/settings_customer.php';
+
+// Para sa "active" na link sa guest menu
+$sxCurrentPage = basename($_SERVER['SCRIPT_NAME'] ?? '');
 ?>
 
 <nav class="navbar navbar-expand-lg navbar-light">
     <div class="container-fluid px-3 px-lg-4">
 
         <?php if (is_logged_in()): ?>
-            <button class="btn" id="sidebarToggle" type="button">☰</button>
+            <button id="sidebarToggle" type="button" aria-label="Open menu"><i class="fa-solid fa-bars-staggered"></i></button>
         <?php endif; ?>
 
         <a class="navbar-brand" href="<?php 
@@ -398,6 +426,8 @@ if (is_logged_in() && isset($_SESSION['user'])) {
                 echo '/sweepxpress/index.php';
             }
         ?>">
+            <!-- Placeholder ng logo; papalitan ng <img> kapag nasa assets/brand/ na ang transparent PNG -->
+            <span class="sx-logo-mark" aria-hidden="true">X</span>
             <span class="sx-wordmark">Sweep<span class="sx-wordmark-x">X</span>press</span>
         </a>
 
@@ -420,7 +450,7 @@ if (is_logged_in() && isset($_SESSION['user'])) {
                         aria-controls="navbarNav"
                         aria-expanded="false"
                         aria-label="Toggle navigation">
-                    <span class="navbar-toggler-icon"></span>
+                    <i class="fa-solid fa-bars"></i>
                 </button>
             <?php endif; ?>
         </div>
@@ -429,10 +459,10 @@ if (is_logged_in() && isset($_SESSION['user'])) {
             <ul class="navbar-nav ms-auto align-items-lg-center gap-2">
                 <?php if (is_logged_in()): ?>
                     <li class="nav-item w-100 w-lg-auto">
-                        <div class="profile-section">
-                            <img src="<?php echo $profileImage; ?>" alt="Profile" class="profile-img">
-                            <span class="navbar-text">Hi, <?php echo h($displayName); ?></span>
-                        </div>
+                        <a class="profile-section" href="<?php echo $sxSettingsUrl; ?>" title="Account settings">
+                            <img src="<?php echo $profileImage; ?>" alt="" class="profile-img">
+                            <span class="navbar-text">Hi, <?php echo h($displayName); ?><small><?php echo $sxRoleLabel; ?></small></span>
+                        </a>
                     </li>
 
                     <?php if (!is_admin() && !is_supplier()): ?>
@@ -441,8 +471,8 @@ if (is_logged_in() && isset($_SESSION['user'])) {
                             $badge_visibility_class = ($cartCount == 0 ? 'd-none' : '');
                         ?>
                         <li class="nav-item d-flex justify-content-lg-center">
-                            <a class="cart-link" href="/sweepxpress/cart.php">
-                                <i class="bi bi-cart-fill"></i>
+                            <a class="cart-link" href="/sweepxpress/cart.php" aria-label="Cart">
+                                <i class="fa-solid fa-cart-shopping"></i>
                                 <span id="cart-badge" class="<?php echo $badge_visibility_class; ?>">
                                     <span id="cart-badge-count"><?php echo $cartCount; ?></span>
                                 </span>
@@ -451,17 +481,19 @@ if (is_logged_in() && isset($_SESSION['user'])) {
                     <?php endif; ?>
 
                     <li class="nav-item d-flex">
-                        <a class="btn btn-logout ms-lg-1" href="/sweepxpress/logout.php">Logout</a>
+                        <a class="sx-btn sx-btn-outline sx-btn-sm ms-lg-1" href="/sweepxpress/logout.php">
+                            <i class="fa-solid fa-arrow-right-from-bracket"></i> Logout
+                        </a>
                     </li>
 
                 <?php else: ?>
-                    <li class="nav-item"><a class="nav-link" href="/sweepxpress/index.php">Home</a></li>
-                    <li class="nav-item"><a class="nav-link" href="/sweepxpress/about.php">About Us</a></li>
-                    <li class="nav-item"><a class="nav-link" href="/sweepxpress/contact.php">Contact</a></li>
-                    <li class="nav-item"><a class="nav-link" href="/sweepxpress/privacy.php">Privacy Policy</a></li>
-                    <li class="nav-item"><a class="nav-link" href="/sweepxpress/terms.php">Terms &amp; Conditions</a></li>
-                    <li class="nav-item d-flex">
-                        <a class="btn btn-logout ms-lg-1" href="/sweepxpress/login.php">Login</a>
+                    <li class="nav-item"><a class="nav-link <?php echo $sxCurrentPage === 'index.php' ? 'active' : ''; ?>" href="/sweepxpress/index.php">Shop</a></li>
+                    <li class="nav-item"><a class="nav-link <?php echo $sxCurrentPage === 'about.php' ? 'active' : ''; ?>" href="/sweepxpress/about.php">About Us</a></li>
+                    <li class="nav-item"><a class="nav-link <?php echo $sxCurrentPage === 'contact.php' ? 'active' : ''; ?>" href="/sweepxpress/contact.php">Contact</a></li>
+                    <!-- Privacy at Terms: nasa footer na -->
+                    <li class="nav-item d-flex gap-2 ms-lg-2">
+                        <a class="sx-btn sx-btn-ghost" href="/sweepxpress/login.php">Log in</a>
+                        <a class="sx-btn sx-btn-dark sx-btn-arrow" href="/sweepxpress/register.php">Sign up <span class="sx-btn-icon"><i class="fa-solid fa-arrow-right"></i></span></a>
                     </li>
                 <?php endif; ?>
             </ul>

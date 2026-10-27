@@ -36,6 +36,14 @@
   --sx-gradient-wordmark: linear-gradient(180deg, #1e3a8a 0%, #1f5f8f 42%, #10b981 75%, #6ee7b7 100%);
   --sx-gradient-x: linear-gradient(180deg, #10b981 0%, #047857 100%);
   --sx-gradient-arrow: linear-gradient(90deg, #10b981 0%, #6ee7b7 100%);
+  --sx-gradient-wordmark-light: linear-gradient(180deg, #a5b8ff 0%, #8fc9e0 42%, #6ee7b7 75%, #a7f3d0 100%);  /* sa madilim na background */
+
+  /* Footer (laging madilim, light man o dark mode) */
+  --sx-footer-bg: #0b1735;
+  --sx-footer-heading: #ffffff;
+  --sx-footer-text: #cbd5e1;
+  --sx-footer-muted: #94a3b8;
+  --sx-footer-border: rgba(255, 255, 255, 0.08);
 
   /* Feedback */
   --sx-success: #10b981;
@@ -136,6 +144,7 @@
 
   --sx-gradient-wordmark: linear-gradient(180deg, #a5b8ff 0%, #8fc9e0 42%, #6ee7b7 75%, #a7f3d0 100%);
   --sx-gradient-x: linear-gradient(180deg, #a7f3d0 0%, #34d399 100%);
+  --sx-footer-bg: #060b18;
 
   --sx-status-pending-bg: #3a2e0b;    --sx-status-pending: #fcd34d;
   --sx-status-preparing-bg: #172554;  --sx-status-preparing: #93c5fd;
@@ -1149,6 +1158,131 @@ a:hover > .sx-wordmark { background-position: 50% 100%; }  /* dumudulas pataas a
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
+/* Wordmark sa madilim na background (hal. footer) */
+.sx-wordmark-light {
+  --sx-gradient-wordmark: var(--sx-gradient-wordmark-light);
+  --sx-gradient-x: linear-gradient(180deg, #a7f3d0 0%, #34d399 100%);
+}
+
+/* ----- Logo mark (placeholder hanggang may transparent PNG sa assets/brand/) ----- */
+.sx-logo-mark {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--sx-gradient-brand);
+  color: #fff;
+  font-size: 1.15rem;
+  font-weight: 900;
+  line-height: 1;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--sx-primary) 30%, transparent);
+  transform: rotate(-6deg);
+  transition: transform var(--sx-transition);
+}
+a:hover > .sx-logo-mark { transform: rotate(0); }
+.sx-logo-mark img { width: 100%; height: 100%; object-fit: contain; }
+
+/* ----- Footer (Phase 9a) ----- */
+.sx-footer {
+  position: relative;
+  overflow: hidden;
+  margin-top: var(--sx-space-8);
+  padding-top: var(--sx-space-8);
+  background: var(--sx-footer-bg);
+  color: var(--sx-footer-text);
+}
+.sx-footer::before {                /* brand gradient na linya sa itaas */
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--sx-gradient-brand);
+}
+.sx-footer-glow {                   /* malambot na emerald na liwanag sa kanang itaas */
+  position: absolute;
+  top: -260px;
+  right: -160px;
+  width: 520px;
+  height: 520px;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--sx-accent) 22%, transparent) 0%, transparent 70%);
+  pointer-events: none;
+}
+.sx-footer .sx-container { position: relative; }
+.sx-footer-top {
+  display: grid;
+  gap: var(--sx-space-7);
+  padding-bottom: var(--sx-space-7);
+  border-bottom: 1px solid var(--sx-footer-border);
+}
+.sx-footer-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: var(--sx-space-4);
+  font-size: 1.6rem;
+  text-decoration: none;
+}
+.sx-footer-brand p {
+  max-width: 360px;
+  margin: 0 0 var(--sx-space-5);
+  line-height: 1.6;
+  color: var(--sx-footer-muted);
+}
+.sx-footer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--sx-space-6);
+}
+.sx-footer h4 {
+  margin: 0 0 var(--sx-space-4);
+  font-size: var(--sx-text-xs);
+  font-weight: var(--sx-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--sx-footer-heading);
+}
+.sx-footer ul {
+  display: grid;
+  gap: var(--sx-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sx-footer ul a {
+  font-size: var(--sx-text-sm);
+  color: var(--sx-footer-muted);
+  text-decoration: none;
+  transition: color var(--sx-transition);
+}
+.sx-footer ul a:hover { color: var(--sx-accent-light); }
+.sx-footer-contact li {
+  display: flex;
+  align-items: center;
+  gap: var(--sx-space-2);
+  font-size: var(--sx-text-sm);
+  color: var(--sx-footer-muted);
+}
+.sx-footer-contact i { width: 16px; color: var(--sx-accent); }
+.sx-footer-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--sx-space-2);
+  padding-block: var(--sx-space-5);
+  font-size: var(--sx-text-xs);
+  color: var(--sx-footer-muted);
+}
+.sx-footer-bottom p { margin: 0; }
+
+@media (min-width: 768px) {
+  .sx-footer-grid { grid-template-columns: repeat(4, 1fr); }
+}
+@media (min-width: 992px) {
+  .sx-footer-top { grid-template-columns: 1.1fr 2fr; }
+}
 
 /* ----- Forms ----- */
 .sx-field { display: flex; flex-direction: column; gap: var(--sx-space-2); margin-bottom: var(--sx-space-4); }
@@ -1294,7 +1428,8 @@ a:hover > .sx-wordmark { background-position: 50% 100%; }  /* dumudulas pataas a
   .sx-btn-icon,
   .sx-card-hover,
   .sx-chip,
-  .sx-wordmark { transition: none; }
+  .sx-wordmark,
+  .sx-logo-mark { transition: none; }
   .sx-btn:hover,
   .sx-card-hover:hover { transform: none; }
 }
