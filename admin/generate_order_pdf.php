@@ -56,7 +56,7 @@ try {
     $stmtItems = $pdo->prepare("
         SELECT oi.*, p.name 
         FROM order_items oi 
-        JOIN products p ON oi.product_id = p.id 
+        LEFT JOIN products p ON oi.product_id = p.id 
         WHERE oi.order_id = ?
     ");
     $stmtItems->execute([$orderId]);
@@ -65,16 +65,16 @@ try {
     // Fetch delivery details
     $stmtDelivery = $pdo->prepare("SELECT * FROM deliveries WHERE order_id = ?");
     $stmtDelivery->execute([$orderId]);
-    $delivery = $stmtDelivery->fetch(PDO::FETCH_ASSOC);
+    $delivery = $stmtDelivery->fetch(PDO::FETCH_ASSOC) ?: []; // walang delivery row = walang petsa (dati: warning)
 
 } catch (PDOException $e) {
     error_log("PDF Data Fetch Error: " . $e->getMessage());
     http_response_code(500);
-    die("Database error while fetching order data: " . $e->getMessage()); 
+    die("Could not load this order."); // walang DB detalye sa screen
 }
 
 // Set fallback name/email for guest orders
-$order['user_name'] = $order['user_name'] ?? htmlspecialchars($order['customer_name']) . ' (Guest)';
+$order['user_name'] = $order['user_name'] ?? ($order['customer_name'] ?: 'Guest') . ' (Guest)'; // dati na-escape nang dalawang beses
 $order['user_email'] = $order['user_email'] ?? 'N/A';
 
 
@@ -97,7 +97,7 @@ if (empty($phone_display_value) && !empty($order['notes'])) {
 
 $phone_display = htmlspecialchars($phone_display_value ?? 'N/A');
 
-$delivery_date_display = $delivery['delivery_date'] ? date("F j, Y", strtotime($delivery['delivery_date'])) : 'N/A';
+$delivery_date_display = !empty($delivery['delivery_date']) ? date("F j, Y", strtotime($delivery['delivery_date'])) : 'N/A';
 
 
 // --- Status Badge Helper (Unchanged) ---
@@ -194,7 +194,7 @@ if (empty($items)) {
         $itemTotal += $subtotal;
         $html .= '
             <tr>
-                <td>' . htmlspecialchars($item['name']) . '</td>
+                <td>' . htmlspecialchars($item['name'] ?? 'Product no longer available') . '</td>
                 <td class="text-right">' . format_currency($item['price']) . '</td>
                 <td class="text-center">' . htmlspecialchars($item['quantity']) . '</td>
                 <td class="text-right">' . format_currency($subtotal) . '</td>

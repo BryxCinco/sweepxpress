@@ -1,689 +1,242 @@
 <?php
+// admin/allorders.php — iisang listahan ng orders (dati: allorders hub + order_all, orders_pending,
+// orders_completed, orders_archive_all at orders.php — redirect na lang sila rito na may filter).
+if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../config.php';
-
-if (!function_exists('h')) {
-    function h($text): string {
-        return htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
-    }
-}
-
 if (!is_admin()) {
     header("Location: /sweepxpress/login.php");
     exit;
 }
+require_once __DIR__ . '/../includes/order_ops.php';
 
-$currentAdmin = $_SESSION['user'] ?? [];
+// Status tabs → mga status sa DB
+$tabs = [
+    'all'       => ['All', null],
+    'pending'   => ['To process', ['pending', 'Pending PO']],
+    'preparing' => ['Preparing', ['preparing', 'shipped']],
+    'delivered' => ['Delivered', ['delivered']],
+    'completed' => ['Completed', ['completed']],
+    'requests'  => ['Cancel requests', ['cancellation_requested']],
+    'cancelled' => ['Cancelled', ['cancelled']],
+];
+$types = ['all' => 'All types', 'b2c' => 'Retail', 'b2b' => 'Business / PO'];
 
-// ORDER-SPECIFIC QUERIES FOR STATS CARDS
-$totalOrders = $pdo->query("SELECT COUNT(*) AS cnt FROM orders")->fetch()['cnt'];
-$pendingOrders = $pdo->query("SELECT COUNT(*) AS cnt FROM orders WHERE status = 'pending'")->fetch()['cnt'];
-$cancellationRequests = $pdo->query("SELECT COUNT(*) AS cnt FROM orders WHERE status = 'cancellation_requested'")->fetch()['cnt'];
-$ordersComplete = $pdo->query("SELECT COUNT(*) AS cnt FROM orders WHERE status = 'delivered'")->fetch()['cnt'];
-$archivedOrders = $pdo->query("SELECT COUNT(*) AS cnt FROM orders")->fetch()['cnt'];
+$tab    = isset($tabs[$_GET['tab'] ?? '']) ? $_GET['tab'] : 'all';
+$type   = isset($types[$_GET['type'] ?? '']) ? $_GET['type'] : 'all';
+$search = trim($_GET['q'] ?? '');
+$year   = ctype_digit($_GET['year'] ?? '') ? (int)$_GET['year'] : 0;
+$month  = ctype_digit($_GET['month'] ?? '') && (int)$_GET['month'] >= 1 && (int)$_GET['month'] <= 12 ? (int)$_GET['month'] : 0;
+$limit  = 20;
+$page   = max(1, (int)($_GET['page'] ?? 1));
+
+// Business = B2B order, PO, o account na business (lumang PO ay naka-save na B2C)
+$b2bSql = "(o.order_type = 'B2B' OR o.status = 'Pending PO' OR COALESCE(u.role, '') = 'business')";
+
+// WHERE na hindi kasama ang tab (para sa bilang bawat tab)
+$where = [];
+$params = [];
+if ($type === 'b2b') $where[] = $b2bSql;
+if ($type === 'b2c') $where[] = "NOT {$b2bSql}";
+if ($search !== '') {
+    $where[] = '(o.id = ? OR o.customer_name LIKE ? OR u.name LIKE ? OR u.email LIKE ?)';
+    array_push($params, ctype_digit(ltrim($search, '#')) ? (int)ltrim($search, '#') : 0, "%{$search}%", "%{$search}%", "%{$search}%");
+}
+if ($year)  { $where[] = 'YEAR(o.created_at) = ?';  $params[] = $year; }
+if ($month) { $where[] = 'MONTH(o.created_at) = ?'; $params[] = $month; }
+$baseWhere = $where ? implode(' AND ', $where) : '1=1';
+$from = "FROM orders o LEFT JOIN users u ON u.id = o.user_id";
+
+// Bilang bawat status (para sa tabs)
+$countStmt = $pdo->prepare("SELECT o.status, COUNT(*) {$from} WHERE {$baseWhere} GROUP BY o.status");
+$countStmt->execute($params);
+$byStatus = $countStmt->fetchAll(PDO::FETCH_KEY_PAIR);
+$tabCounts = [];
+foreach ($tabs as $k => [, $statuses]) {
+    $tabCounts[$k] = $statuses === null ? array_sum($byStatus) : array_sum(array_map(fn($s) => (int)($byStatus[$s] ?? 0), $statuses));
+}
+
+// Listahan
+$listWhere = $baseWhere;
+$listParams = $params;
+if ($tabs[$tab][1] !== null) {
+    $listWhere .= ' AND o.status IN (' . implode(',', array_fill(0, count($tabs[$tab][1]), '?')) . ')';
+    $listParams = array_merge($listParams, $tabs[$tab][1]);
+}
+$total = $tabCounts[$tab];
+$totalPages = max(1, (int)ceil($total / $limit));
+$page = min($page, $totalPages);
+$offset = ($page - 1) * $limit;
+
+$stmt = $pdo->prepare("
+    SELECT o.id, o.status, o.total, o.created_at, o.order_type, o.payment_terms, o.customer_name,
+           u.name AS account_name, u.email, u.role,
+           (SELECT SUM(quantity) FROM order_items WHERE order_id = o.id) AS units,
+           (SELECT MAX(delivery_date) FROM deliveries WHERE order_id = o.id) AS delivery_date
+    {$from}
+    WHERE {$listWhere}
+    ORDER BY o.created_at DESC, o.id DESC
+    LIMIT {$limit} OFFSET {$offset}
+");
+$stmt->execute($listParams);
+$orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$years = $pdo->query("SELECT DISTINCT YEAR(created_at) FROM orders ORDER BY 1 DESC")->fetchAll(PDO::FETCH_COLUMN);
+$requestCount = (int)($byStatus['cancellation_requested'] ?? 0);
+
+$url = function (array $changes = []) use ($tab, $type, $search, $year, $month, $page) {
+    $q = array_filter(array_merge([
+        'tab' => $tab === 'all' ? null : $tab, 'type' => $type === 'all' ? null : $type,
+        'q' => $search, 'year' => $year ?: null, 'month' => $month ?: null, 'page' => $page > 1 ? $page : null,
+    ], $changes), fn($v) => $v !== null && $v !== '');
+    return 'allorders.php' . ($q ? '?' . http_build_query($q) : '');
+};
+
+// PDF report: generate_pdf.php ay tumatanggap lang ng ilang status
+$pdfStatus = ['preparing' => 'preparing', 'delivered' => 'delivered', 'completed' => 'completed', 'requests' => 'cancellation_requested', 'cancelled' => 'cancelled'][$tab] ?? 'all';
+$pdfUrl = 'generate_pdf.php?' . http_build_query(array_filter(['status' => $pdfStatus, 'year' => $year ?: null, 'month' => $month ?: null]));
 
 require_once __DIR__ . '/../includes/header.php';
 ?>
 
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Poppins:wght@600;700;800;900&display=swap');
-
-:root {
-    --primary: #5b71f6;
-    --primary-dark: #4556d8;
-    --secondary: #7c3aed;
-    --success: #0ea5e9;
-    --warning: #f59e0b;
-    --danger: #ef4444;
-    --info: #06b6d4;
-    
-    --bg-main: #fafbff;
-    --bg-elevated: #ffffff;
-    --text-primary: #0f172a;
-    --text-secondary: #475569;
-    --text-tertiary: #94a3b8;
-    
-    --radius-2xl: 32px;
-    --radius-xl: 24px;
-    --radius-lg: 20px;
-    --radius-md: 16px;
-    
-    --shadow-elevation-1: 0 2px 8px rgba(15, 23, 42, 0.04);
-    --shadow-elevation-2: 0 8px 24px rgba(15, 23, 42, 0.08);
-    --shadow-elevation-3: 0 16px 48px rgba(15, 23, 42, 0.12);
-    --shadow-elevation-4: 0 24px 64px rgba(15, 23, 42, 0.16);
-    
-    --glow-primary: 0 8px 32px rgba(91, 113, 246, 0.25);
-    --glow-success: 0 8px 32px rgba(14, 165, 233, 0.25);
-    --glow-warning: 0 8px 32px rgba(245, 158, 11, 0.25);
-    --glow-danger: 0 8px 32px rgba(239, 68, 68, 0.25);
-    --glow-info: 0 8px 32px rgba(6, 182, 212, 0.25);
-}
-
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
-
-body {
-    background: linear-gradient(135deg, #f0f4ff 0%, #fafbff 50%, #f5f8ff 100%);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    position: relative;
-    overflow-x: hidden;
-}
-
-body::before {
-    content: '';
-    position: fixed;
-    top: -50%;
-    right: -50%;
-    width: 100%;
-    height: 100%;
-    background: radial-gradient(circle, rgba(91, 113, 246, 0.03) 0%, transparent 70%);
-    pointer-events: none;
-    z-index: 0;
-}
-
-.orders-ultra-container {
-    max-width: 1440px;
-    margin: 0 auto;
-    padding: 48px 32px 64px;
-    position: relative;
-    z-index: 1;
-}
-
-/* ============================================
-   ULTRA-PREMIUM HEADER
-   ============================================ */
-.header-ultra {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 48px;
-    gap: 24px;
-    flex-wrap: wrap;
-}
-
-.header-left-ultra {
-    flex: 1;
-}
-
-.header-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    background: linear-gradient(135deg, rgba(91, 113, 246, 0.08) 0%, rgba(124, 58, 237, 0.08) 100%);
-    border: 1px solid rgba(91, 113, 246, 0.12);
-    padding: 8px 16px;
-    border-radius: 999px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: var(--primary);
-    margin-bottom: 16px;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-}
-
-.title-ultra {
-    font-family: 'Poppins', sans-serif;
-    font-size: 3rem;
-    font-weight: 900;
-    color: var(--text-primary);
-    letter-spacing: -0.04em;
-    line-height: 1.1;
-    margin-bottom: 12px;
-    background: linear-gradient(135deg, #0f172a 0%, #334155 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-
-.subtitle-ultra {
-    font-size: 1.05rem;
-    color: var(--text-secondary);
-    font-weight: 400;
-}
-
-.header-actions-ultra {
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-}
-
-.btn-ultra {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    padding: 14px 24px;
-    border-radius: var(--radius-lg);
-    font-size: 0.9rem;
-    font-weight: 600;
-    text-decoration: none;
-    border: none;
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
-    overflow: hidden;
-}
-
-.btn-ultra::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0) 100%);
-    opacity: 0;
-    transition: opacity 0.3s;
-}
-
-.btn-ultra:hover::before {
-    opacity: 1;
-}
-
-.btn-ultra.primary {
-    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
-    color: #ffffff;
-    box-shadow: var(--shadow-elevation-2), var(--glow-primary);
-}
-
-.btn-ultra.primary:hover {
-    transform: translateY(-3px) scale(1.02);
-    box-shadow: var(--shadow-elevation-4), var(--glow-primary);
-    color: #ffffff;
-}
-
-.btn-ultra.secondary {
-    background: var(--bg-elevated);
-    color: var(--text-primary);
-    border: 2px solid rgba(15, 23, 42, 0.08);
-    box-shadow: var(--shadow-elevation-1);
-}
-
-.btn-ultra.secondary:hover {
-    transform: translateY(-3px);
-    box-shadow: var(--shadow-elevation-3);
-    border-color: rgba(15, 23, 42, 0.12);
-    color: var(--text-primary);
-}
-
-/* ============================================
-   FLOATING STATS CARDS
-   ============================================ */
-.stats-grid-ultra {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 28px;
-    margin-bottom: 48px;
-}
-
-.stat-card-ultra {
-    background: var(--bg-elevated);
-    border-radius: var(--radius-2xl);
-    padding: 32px 28px;
-    border: 1px solid rgba(15, 23, 42, 0.04);
-    box-shadow: var(--shadow-elevation-2);
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
-    overflow: hidden;
-    text-decoration: none;
-    color: inherit;
-    display: block;
-}
-
-.stat-card-ultra::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: radial-gradient(circle at top right, rgba(91, 113, 246, 0.03), transparent);
-    opacity: 0;
-    transition: opacity 0.4s;
-}
-
-.stat-card-ultra:hover {
-    transform: translateY(-12px) scale(1.02);
-    box-shadow: var(--shadow-elevation-4);
-    border-color: rgba(91, 113, 246, 0.12);
-}
-
-.stat-card-ultra:hover::before {
-    opacity: 1;
-}
-
-.stat-card-ultra::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 4px;
-    background: linear-gradient(90deg, var(--card-gradient-start), var(--card-gradient-end));
-    transform: scaleX(0);
-    transform-origin: left;
-    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.stat-card-ultra:hover::after {
-    transform: scaleX(1);
-}
-
-/* Card Variants */
-.stat-card-ultra.variant-blue {
-    --card-gradient-start: #5b71f6;
-    --card-gradient-end: #6b84ff;
-    --card-icon-bg: linear-gradient(135deg, #5b71f6 0%, #6b84ff 100%);
-}
-
-.stat-card-ultra.variant-yellow {
-    --card-gradient-start: #f59e0b;
-    --card-gradient-end: #fbbf24;
-    --card-icon-bg: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
-}
-
-.stat-card-ultra.variant-red {
-    --card-gradient-start: #ef4444;
-    --card-gradient-end: #f87171;
-    --card-icon-bg: linear-gradient(135deg, #ef4444 0%, #f87171 100%);
-}
-
-.stat-card-ultra.variant-green {
-    --card-gradient-start: #0ea5e9;
-    --card-gradient-end: #38bdf8;
-    --card-icon-bg: linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%);
-}
-
-.stat-card-ultra.variant-cyan {
-    --card-gradient-start: #06b6d4;
-    --card-gradient-end: #22d3ee;
-    --card-icon-bg: linear-gradient(135deg, #06b6d4 0%, #22d3ee 100%);
-}
-
-.stat-card-header-ultra {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 24px;
-}
-
-.stat-icon-ultra {
-    width: 64px;
-    height: 64px;
-    border-radius: var(--radius-lg);
-    background: var(--card-icon-bg);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #ffffff;
-    font-size: 1.8rem;
-    box-shadow: 0 12px 32px rgba(91, 113, 246, 0.3);
-    position: relative;
-}
-
-.stat-icon-ultra::before {
-    content: '';
-    position: absolute;
-    inset: -4px;
-    background: inherit;
-    border-radius: inherit;
-    opacity: 0.3;
-    filter: blur(12px);
-}
-
-.stat-info-ultra {
-    flex: 1;
-    text-align: right;
-}
-
-.stat-label-ultra {
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    margin-bottom: 8px;
-}
-
-.stat-value-ultra {
-    font-family: 'Poppins', sans-serif;
-    font-size: 3rem;
-    font-weight: 900;
-    line-height: 1;
-    color: var(--text-primary);
-    letter-spacing: -0.03em;
-}
-
-.stat-footer-ultra {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-top: 20px;
-    border-top: 1px solid rgba(15, 23, 42, 0.06);
-}
-
-.stat-badge-ultra {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 14px;
-    border-radius: 999px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    background: linear-gradient(135deg, rgba(91, 113, 246, 0.08), rgba(124, 58, 237, 0.08));
-    color: var(--primary);
-    border: 1px solid rgba(91, 113, 246, 0.12);
-}
-
-.stat-arrow-ultra {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    background: rgba(91, 113, 246, 0.08);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--primary);
-    transition: all 0.3s;
-}
-
-.stat-card-ultra:hover .stat-arrow-ultra {
-    background: var(--card-icon-bg);
-    color: #ffffff;
-    transform: translateX(4px);
-}
-
-/* ============================================
-   PREMIUM INFO BANNER
-   ============================================ */
-.info-banner-ultra {
-    background: linear-gradient(135deg, #ffffff 0%, #f8faff 100%);
-    border: 1px solid rgba(91, 113, 246, 0.12);
-    border-radius: var(--radius-2xl);
-    padding: 28px 32px;
-    display: flex;
-    align-items: center;
-    gap: 20px;
-    box-shadow: var(--shadow-elevation-2);
-}
-
-.info-icon-ultra {
-    width: 56px;
-    height: 56px;
-    border-radius: var(--radius-lg);
-    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #ffffff;
-    font-size: 1.5rem;
-    flex-shrink: 0;
-    box-shadow: var(--glow-primary);
-}
-
-.info-content-ultra {
-    flex: 1;
-}
-
-.info-title-ultra {
-    font-size: 1.05rem;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin-bottom: 4px;
-}
-
-.info-text-ultra {
-    font-size: 0.95rem;
-    color: var(--text-secondary);
-    line-height: 1.6;
-    margin: 0;
-}
-
-/* ============================================
-   RESPONSIVE
-   ============================================ */
-@media (max-width: 1024px) {
-    .title-ultra {
-        font-size: 2.5rem;
-    }
-    
-    .stats-grid-ultra {
-        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-        gap: 20px;
-    }
-}
-
-@media (max-width: 768px) {
-    .orders-ultra-container {
-        padding: 32px 20px 48px;
-    }
-    
-    .header-ultra {
-        flex-direction: column;
-        align-items: flex-start;
-        margin-bottom: 32px;
-    }
-    
-    .title-ultra {
-        font-size: 2rem;
-    }
-    
-    .header-actions-ultra {
-        width: 100%;
-        flex-direction: column;
-    }
-    
-    .btn-ultra {
-        width: 100%;
-        justify-content: center;
-    }
-    
-    .stats-grid-ultra {
-        grid-template-columns: 1fr;
-        gap: 16px;
-    }
-    
-    .stat-value-ultra {
-        font-size: 2.5rem;
-    }
-    
-    .info-banner-ultra {
-        flex-direction: column;
-        text-align: center;
-    }
-}
-
-/* ============================================
-   ANIMATIONS
-   ============================================ */
-@keyframes float {
-    0%, 100% {
-        transform: translateY(0);
-    }
-    50% {
-        transform: translateY(-10px);
-    }
-}
-
-@keyframes fadeInScale {
-    from {
-        opacity: 0;
-        transform: scale(0.95);
-    }
-    to {
-        opacity: 1;
-        transform: scale(1);
-    }
-}
-
-.stat-card-ultra {
-    animation: fadeInScale 0.5s cubic-bezier(0.4, 0, 0.2, 1) backwards;
-}
-
-.stat-card-ultra:nth-child(1) { animation-delay: 0.1s; }
-.stat-card-ultra:nth-child(2) { animation-delay: 0.2s; }
-.stat-card-ultra:nth-child(3) { animation-delay: 0.3s; }
-.stat-card-ultra:nth-child(4) { animation-delay: 0.4s; }
-.stat-card-ultra:nth-child(5) { animation-delay: 0.5s; }
-
-.stat-icon-ultra {
-    animation: float 3s ease-in-out infinite;
-}
-
-.stat-card-ultra:nth-child(1) .stat-icon-ultra { animation-delay: 0s; }
-.stat-card-ultra:nth-child(2) .stat-icon-ultra { animation-delay: 0.5s; }
-.stat-card-ultra:nth-child(3) .stat-icon-ultra { animation-delay: 1s; }
-.stat-card-ultra:nth-child(4) .stat-icon-ultra { animation-delay: 1.5s; }
-.stat-card-ultra:nth-child(5) .stat-icon-ultra { animation-delay: 2s; }
+/* ============================================================
+   ADMIN ORDERS (Phase 9f) — tokens + sx-table / sx-chip / sx-pill mula sa assets/style.css
+   ============================================================ */
+.ol { max-width: 1440px; padding-block: var(--sx-space-5) var(--sx-space-8); }
+.ol-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--sx-space-3); margin-bottom: var(--sx-space-5); }
+.ol-head p { margin: var(--sx-space-2) 0 0; color: var(--sx-muted); }
+.ol-head-actions { display: flex; flex-wrap: wrap; gap: var(--sx-space-2); }
+.ol-tabs { display: flex; gap: var(--sx-space-2); margin-bottom: var(--sx-space-3); overflow-x: auto; scrollbar-width: none; }
+.ol-tabs::-webkit-scrollbar { display: none; }
+.ol-tabs .sx-chip { flex-shrink: 0; }
+.ol-tabs .sx-chip span { margin-left: 4px; opacity: 0.7; }
+.ol-tabs .sx-chip.hot:not(.active) { border-color: var(--sx-status-pending); color: var(--sx-status-pending); }
+.ol-filters { display: grid; gap: var(--sx-space-2); margin-bottom: var(--sx-space-4); padding: var(--sx-space-3) var(--sx-space-4); }
+.ol-filters form { display: flex; flex-wrap: wrap; gap: var(--sx-space-2); align-items: center; }
+.ol-filters .sx-input { flex: 1 1 220px; min-width: 0; }
+.ol-filters .sx-select { width: auto; flex: 0 0 auto; }
+.ol-table tbody tr { cursor: pointer; }
+.ol-table .num { text-align: right; white-space: nowrap; }
+.ol-table .muted { color: var(--sx-muted); font-size: var(--sx-text-sm); white-space: nowrap; }
+.ol-table .who strong { display: block; color: var(--sx-dark); }
+.ol-table .who small { color: var(--sx-muted); }
+.ol-id { font-weight: var(--sx-weight-bold); color: var(--sx-dark); text-decoration: none; }
+.ol-id:hover { color: var(--sx-primary); }
+.ol-tag { margin-left: 6px; padding: 1px 6px; border-radius: var(--sx-radius-pill); background: var(--sx-primary-soft); color: var(--sx-primary); font-size: 10px; font-weight: var(--sx-weight-bold); }
+@media (max-width: 767.98px) { .ol-table .hide-sm { display: none; } }
 </style>
 
-<div class="orders-ultra-container">
-    <!-- ULTRA-PREMIUM HEADER -->
-    <div class="header-ultra">
-        <div class="header-left-ultra">
-            <div class="header-badge">
-                <i class="fas fa-chart-line"></i>
-                Order Management System
-            </div>
-            <h1 class="title-ultra">Orders Dashboard</h1>
-            <p class="subtitle-ultra">Monitor and manage all your orders in real-time</p>
+<div class="ol sx-container">
+    <div class="ol-head">
+        <div>
+            <span class="sx-eyebrow">Sales</span>
+            <h1 class="sx-heading-lg">Orders</h1>
+            <p><?= number_format(array_sum($byStatus)) ?> order<?= array_sum($byStatus) === 1 ? '' : 's' ?><?= $search || $year || $type !== 'all' ? ' match your filters' : ' in total' ?></p>
         </div>
-        <div class="header-actions-ultra">
-            <a href="generate_pdf.php?status=all" target="_blank" class="btn-ultra primary">
-                <i class="fas fa-file-pdf"></i>
-                Generate Report
-            </a>
-            <a href="dashboard.php" class="btn-ultra secondary">
-                <i class="fas fa-arrow-left"></i>
-                Main Dashboard
-            </a>
+        <div class="ol-head-actions">
+            <a href="deliveries.php" class="sx-btn sx-btn-outline sx-btn-sm"><i class="fa-solid fa-truck-fast"></i> Deliveries</a>
+            <a href="orders_cancellation.php" class="sx-btn sx-btn-outline sx-btn-sm"><i class="fa-solid fa-ban"></i> Cancel requests<?= $requestCount ? " ({$requestCount})" : '' ?></a>
+            <a href="<?= h($pdfUrl) ?>" target="_blank" class="sx-btn sx-btn-primary sx-btn-sm"><i class="fa-solid fa-file-pdf"></i> PDF report</a>
         </div>
     </div>
 
-    <!-- FLOATING STATS CARDS -->
-    <div class="stats-grid-ultra">
-        <!-- Regular Orders -->
-        <a href="order_all.php" class="stat-card-ultra variant-blue">
-            <div class="stat-card-header-ultra">
-                <div class="stat-icon-ultra">
-                    <i class="fas fa-shopping-bag"></i>
-                </div>
-                <div class="stat-info-ultra">
-                    <div class="stat-label-ultra">Regular Orders</div>
-                    <div class="stat-value-ultra"><?= h($totalOrders); ?></div>
-                </div>
-            </div>
-            <div class="stat-footer-ultra">
-                <span class="stat-badge-ultra">
-                    <i class="fas fa-users"></i>
-                    Customer Orders
-                </span>
-                <div class="stat-arrow-ultra">
-                    <i class="fas fa-arrow-right"></i>
-                </div>
-            </div>
-        </a>
+    <nav class="ol-tabs" aria-label="Filter by status">
+        <?php foreach ($tabs as $k => [$label]): ?>
+            <a href="<?= h($url(['tab' => $k === 'all' ? null : $k, 'page' => null])) ?>"
+               class="sx-chip<?= $tab === $k ? ' active' : '' ?><?= $k === 'requests' && $tabCounts[$k] ? ' hot' : '' ?>"><?= $label ?> <span><?= $tabCounts[$k] ?></span></a>
+        <?php endforeach; ?>
+    </nav>
 
-        <!-- Purchase Orders -->
-        <a href="orders_pending.php" class="stat-card-ultra variant-yellow">
-            <div class="stat-card-header-ultra">
-                <div class="stat-icon-ultra">
-                    <i class="fas fa-file-invoice"></i>
-                </div>
-                <div class="stat-info-ultra">
-                    <div class="stat-label-ultra">Purchase Orders</div>
-                    <div class="stat-value-ultra"><?= h($pendingOrders); ?></div>
-                </div>
-            </div>
-            <div class="stat-footer-ultra">
-                <span class="stat-badge-ultra">
-                    <i class="fas fa-building"></i>
-                    Business Orders
-                </span>
-                <div class="stat-arrow-ultra">
-                    <i class="fas fa-arrow-right"></i>
-                </div>
-            </div>
-        </a>
-
-        <!-- Cancellation Requests -->
-        <a href="orders_cancellation.php" class="stat-card-ultra variant-red">
-            <div class="stat-card-header-ultra">
-                <div class="stat-icon-ultra">
-                    <i class="fas fa-exclamation-triangle"></i>
-                </div>
-                <div class="stat-info-ultra">
-                    <div class="stat-label-ultra">Cancellation Requests</div>
-                    <div class="stat-value-ultra"><?= h($cancellationRequests); ?></div>
-                </div>
-            </div>
-            <div class="stat-footer-ultra">
-                <span class="stat-badge-ultra">
-                    <i class="fas fa-clipboard-check"></i>
-                    Review Requests
-                </span>
-                <div class="stat-arrow-ultra">
-                    <i class="fas fa-arrow-right"></i>
-                </div>
-            </div>
-        </a>
-
-        <!-- Orders Complete -->
-        <a href="orders_completed.php" class="stat-card-ultra variant-green">
-            <div class="stat-card-header-ultra">
-                <div class="stat-icon-ultra">
-                    <i class="fas fa-check-circle"></i>
-                </div>
-                <div class="stat-info-ultra">
-                    <div class="stat-label-ultra">Orders Complete</div>
-                    <div class="stat-value-ultra"><?= h($ordersComplete); ?></div>
-                </div>
-            </div>
-            <div class="stat-footer-ultra">
-                <span class="stat-badge-ultra">
-                    <i class="fas fa-history"></i>
-                    View History
-                </span>
-                <div class="stat-arrow-ultra">
-                    <i class="fas fa-arrow-right"></i>
-                </div>
-            </div>
-        </a>
-
-        <!-- All Orders Archive -->
-        <a href="orders_archive_all.php" class="stat-card-ultra variant-cyan">
-            <div class="stat-card-header-ultra">
-                <div class="stat-icon-ultra">
-                    <i class="fas fa-archive"></i>
-                </div>
-                <div class="stat-info-ultra">
-                    <div class="stat-label-ultra">All Orders Archive</div>
-                    <div class="stat-value-ultra"><?= h($archivedOrders); ?></div>
-                </div>
-            </div>
-            <div class="stat-footer-ultra">
-                <span class="stat-badge-ultra">
-                    <i class="fas fa-database"></i>
-                    All Statuses
-                </span>
-                <div class="stat-arrow-ultra">
-                    <i class="fas fa-arrow-right"></i>
-                </div>
-            </div>
-        </a>
+    <div class="sx-card ol-filters">
+        <form method="get" role="search">
+            <?php if ($tab !== 'all'): ?><input type="hidden" name="tab" value="<?= h($tab) ?>"><?php endif; ?>
+            <input type="search" name="q" class="sx-input" placeholder="Order #, customer name or email…" value="<?= h($search) ?>" aria-label="Search orders">
+            <select name="type" class="sx-select" aria-label="Order type">
+                <?php foreach ($types as $k => $label): ?><option value="<?= $k ?>" <?= $type === $k ? 'selected' : '' ?>><?= $label ?></option><?php endforeach; ?>
+            </select>
+            <select name="year" class="sx-select" aria-label="Year">
+                <option value="">Any year</option>
+                <?php foreach ($years as $y): ?><option value="<?= (int)$y ?>" <?= $year === (int)$y ? 'selected' : '' ?>><?= (int)$y ?></option><?php endforeach; ?>
+            </select>
+            <select name="month" class="sx-select" aria-label="Month">
+                <option value="">Any month</option>
+                <?php for ($m = 1; $m <= 12; $m++): ?><option value="<?= $m ?>" <?= $month === $m ? 'selected' : '' ?>><?= date('F', mktime(0, 0, 0, $m, 1)) ?></option><?php endfor; ?>
+            </select>
+            <button type="submit" class="sx-btn sx-btn-dark sx-btn-sm"><i class="fa-solid fa-magnifying-glass"></i> Filter</button>
+            <?php if ($search || $year || $month || $type !== 'all'): ?>
+                <a href="<?= h($url(['q' => null, 'type' => null, 'year' => null, 'month' => null, 'page' => null])) ?>" class="sx-btn sx-btn-ghost sx-btn-sm">Clear</a>
+            <?php endif; ?>
+        </form>
     </div>
 
-    <!-- PREMIUM INFO BANNER -->
-    <div class="info-banner-ultra">
-        <div class="info-icon-ultra">
-            <i class="fas fa-lightbulb"></i>
+    <?php if ($orders): ?>
+        <div class="sx-card" style="padding: 0; overflow: hidden">
+            <div class="sx-table-wrap" style="border: 0; border-radius: 0">
+                <table class="sx-table ol-table">
+                    <thead>
+                        <tr>
+                            <th>Order</th>
+                            <th>Customer</th>
+                            <th class="num hide-sm">Units</th>
+                            <th class="num">Total</th>
+                            <th>Status</th>
+                            <th class="hide-sm">Delivery</th>
+                            <th class="hide-sm">Placed</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($orders as $o):
+                            $isB2B = $o['order_type'] === 'B2B' || $o['status'] === 'Pending PO' || $o['role'] === 'business';
+                            $link = 'order_details.php?id=' . (int)$o['id'];
+                        ?>
+                            <tr data-href="<?= $link ?>">
+                                <td style="white-space: nowrap">
+                                    <a href="<?= $link ?>" class="ol-id">#<?= (int)$o['id'] ?></a>
+                                    <?php if ($isB2B): ?><span class="ol-tag"><?= $o['payment_terms'] && str_starts_with($o['payment_terms'], 'Net') ? h($o['payment_terms']) : 'B2B' ?></span><?php endif; ?>
+                                </td>
+                                <td class="who">
+                                    <strong><?= h($o['account_name'] ?: ($o['customer_name'] ?: 'Guest')) ?></strong>
+                                    <small><?= h($o['email'] ?: 'Guest order') ?></small>
+                                </td>
+                                <td class="num hide-sm"><?= (int)$o['units'] ?></td>
+                                <td class="num"><strong>₱<?= number_format((float)$o['total'], 2) ?></strong></td>
+                                <td><?= sx_order_status_pill($o['status']) ?></td>
+                                <td class="muted hide-sm"><?= $o['delivery_date'] ? date('M j, Y', strtotime($o['delivery_date'])) : '—' ?></td>
+                                <td class="muted hide-sm"><?= date('M j, Y', strtotime($o['created_at'])) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
         </div>
-        <div class="info-content-ultra">
-            <div class="info-title-ultra">Quick Navigation</div>
-            <p class="info-text-ultra">
-                Click on any card above to access detailed order management. Each section provides advanced filtering, bulk actions, and comprehensive reporting capabilities.
-            </p>
+
+        <div class="ap-pager">
+            <span>Showing <?= $offset + 1 ?>–<?= $offset + count($orders) ?> of <?= number_format($total) ?></span>
+            <?php if ($totalPages > 1): ?>
+                <nav aria-label="Pages">
+                    <?php if ($page > 1): ?><a href="<?= h($url(['page' => $page - 1])) ?>" aria-label="Previous page"><i class="fa-solid fa-chevron-left"></i></a><?php endif; ?>
+                    <?php for ($i = max(1, $page - 2); $i <= min($totalPages, $page + 2); $i++): ?>
+                        <?php if ($i === $page): ?><span class="cur" aria-current="page"><?= $i ?></span>
+                        <?php else: ?><a href="<?= h($url(['page' => $i])) ?>"><?= $i ?></a><?php endif; ?>
+                    <?php endfor; ?>
+                    <?php if ($page < $totalPages): ?><a href="<?= h($url(['page' => $page + 1])) ?>" aria-label="Next page"><i class="fa-solid fa-chevron-right"></i></a><?php endif; ?>
+                </nav>
+            <?php endif; ?>
         </div>
-    </div>
+    <?php else: ?>
+        <div class="sx-card sx-empty">
+            <i class="fa-solid fa-receipt"></i>
+            <h3>No orders found</h3>
+            <p>Try another tab or clear the filters.</p>
+        </div>
+    <?php endif; ?>
 </div>
+
+<script>
+document.querySelectorAll('.ol-table tr[data-href]').forEach((tr) => tr.addEventListener('click', (e) => {
+    if (!e.target.closest('a')) window.location.href = tr.dataset.href;
+}));
+</script>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>

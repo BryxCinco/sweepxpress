@@ -27,7 +27,8 @@ $report_title_suffix = "";
 
 // Status filter
 if ($status !== 'all') {
-    $valid_statuses = ['pending', 'shipped', 'delivered', 'cancelled', 'cancellation_requested']; 
+    // Dati: kulang ang preparing, completed at Pending PO
+    $valid_statuses = ['pending', 'Pending PO', 'preparing', 'shipped', 'delivered', 'completed', 'cancelled', 'cancellation_requested'];
     if (in_array($status, $valid_statuses)) {
         $query .= " AND status = :status";
         $params[':status'] = $status;
@@ -72,7 +73,7 @@ $html = '
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
     <title>Order Report</title>
     <style>
-        body { font-family: sans-serif; }
+        body { font-family: DejaVu Sans, sans-serif; } /* DejaVu: may ₱ glyph */
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
         th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
         th { background-color: #f2f2f2; }
@@ -103,7 +104,7 @@ $html = '
                 <th>ID</th>
                 <th>Order Date</th>
                 <th>Status</th>
-                <th>Total ($)</th>
+                <th>Total (₱)</th>
                 <th>Customer ID</th>
             </tr>
         </thead>

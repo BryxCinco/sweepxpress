@@ -1,543 +1,224 @@
 <?php
+// admin/deliveries.php — iskedyul ng delivery ng mga aktibong order.
+// Binabasa mula sa orders + deliveries; hindi na nagsusulat sa DB habang binubuksan
+// (dati: "failsafe sync" na gumagawa ng deliveries row tuwing load). Ang pagpalit ng
+// status/petsa ay sa order_details.php (includes/order_ops.php).
 require_once __DIR__ . '/admin_auth.php';
-require_once __DIR__ . '/../includes/header.php';
+require_once __DIR__ . '/../includes/order_ops.php';
 
-// ====================================================================
-// 1. FAILSAFE SYNC (Keeps Deliveries in sync with Orders)
-// ====================================================================
-try {
-    $stmtOrders = $pdo->query("SELECT id, user_id, customer_name, address, created_at FROM orders WHERE id NOT IN (SELECT order_id FROM deliveries)");
-    $missingOrders = $stmtOrders->fetchAll(PDO::FETCH_ASSOC);
+$today = date('Y-m-d');
+$week  = date('Y-m-d', strtotime('+7 days'));
 
-    if (!empty($missingOrders)) {
-        $stmtInsert = $pdo->prepare("INSERT INTO deliveries (order_id, customer_name, address, status, created_at) VALUES (?, ?, ?, 'pending', ?)");
-        $stmtUser   = $pdo->prepare("SELECT name, username FROM users WHERE id = ?");
+// Aktibo = may kailangan pang i-deliver
+$activeSql = "o.status IN ('pending', 'Pending PO', 'preparing', 'shipped')";
+$views = [
+    'overdue'     => ['Overdue',     "{$activeSql} AND d.delivery_date < ?",                 [$today]],
+    'today'       => ['Today',       "{$activeSql} AND d.delivery_date = ?",                 [$today]],
+    'upcoming'    => ['Next 7 days', "{$activeSql} AND d.delivery_date > ? AND d.delivery_date <= ?", [$today, $week]],
+    'later'       => ['Later',       "{$activeSql} AND d.delivery_date > ?",                 [$week]],
+    'unscheduled' => ['No date yet', "{$activeSql} AND d.delivery_date IS NULL",             []],
+    'delivered'   => ['Delivered',   "o.status IN ('delivered', 'completed')",               []],
+];
+$view   = isset($views[$_GET['view'] ?? '']) ? $_GET['view'] : 'overdue';
+$search = trim($_GET['q'] ?? '');
+$limit  = 25;
+$page   = max(1, (int)($_GET['page'] ?? 1));
 
-        foreach ($missingOrders as $order) {
-            $finalName = $order['customer_name'];
-            if (empty($finalName) && !empty($order['user_id'])) {
-                $stmtUser->execute([$order['user_id']]);
-                $user = $stmtUser->fetch(PDO::FETCH_ASSOC);
-                if ($user) {
-                    if (!empty($user['name'])) {
-                        $finalName = $user['name'];
-                    } elseif (!empty($user['username'])) {
-                        $finalName = $user['username'];
-                    }
-                }
-            }
-            if (empty($finalName)) {
-                $finalName = "Guest Customer #" . $order['id'];
-            }
-            $finalAddress = !empty($order['address']) ? $order['address'] : 'Unknown';
-            $stmtInsert->execute([$order['id'], trim($finalName), $finalAddress, $order['created_at']]);
-        }
-    }
-} catch (Exception $e) {
-    error_log("Sync Error: " . $e->getMessage());
-}
-
-// ====================================================================
-// 2. SEARCH & PAGINATION & FILTERS
-// ====================================================================
-$limit  = 15;
-$page   = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
-$offset = ($page - 1) * $limit;
-
-$filter_year   = $_GET['year'] ?? '';
-$filter_month  = $_GET['month'] ?? '';
-$filter_status = $_GET['status'] ?? '';
-$search_query  = $_GET['search'] ?? '';
-
-$where_clauses = ["1=1"];
-$params = [];
-
-if (!empty($search_query)) {
-    $where_clauses[] = "(d.customer_name LIKE ? OR d.order_id LIKE ? OR d.id LIKE ? OR o.po_number LIKE ?)";
-    $term = "%$search_query%";
-    $params[] = $term;
-    $params[] = $term;
-    $params[] = $term;
-    $params[] = $term;
-}
-if (!empty($filter_year)) {
-    $where_clauses[] = "YEAR(d.created_at) = ?";
-    $params[] = $filter_year;
-}
-if (!empty($filter_month)) {
-    $where_clauses[] = "MONTH(d.created_at) = ?";
-    $params[] = $filter_month;
-}
-if (!empty($filter_status)) {
-    $db_search_status = ($filter_status === 'preparing') ? 'preparing' : $filter_status;
-    $where_clauses[]  = "d.status = ?";
-    $params[]         = $db_search_status;
-}
-
-$where_sql = implode(' AND ', $where_clauses);
-
-// Metrics
-$stmtMetrics = $pdo->query("
-    SELECT 
-        COUNT(*) as total_records,
-        SUM(CASE WHEN status IN ('pending', 'shipped') THEN 1 ELSE 0 END) as active_count,
-        SUM(CASE WHEN status = 'pending' AND created_at < DATE_SUB(NOW(), INTERVAL 3 DAY) THEN 1 ELSE 0 END) as risk_count,
-        (SELECT SUM(total) FROM orders WHERE status != 'cancelled') as total_revenue
-    FROM deliveries
-");
-$metrics = $stmtMetrics->fetch(PDO::FETCH_ASSOC);
-
-// Pagination Count
-$stmtCount = $pdo->prepare("SELECT COUNT(*) FROM deliveries d LEFT JOIN orders o ON d.order_id = o.id WHERE $where_sql");
-$stmtCount->execute($params);
-$total_rows  = $stmtCount->fetchColumn();
-$total_pages = ceil($total_rows / $limit);
-
-// MAIN QUERY
-$sql = "
-    SELECT 
-        d.*, 
-        d.customer_name as delivery_name,
-        o.customer_name as order_name,
-        o.po_number,
-        o.payment_terms,
-        o.total, 
-        o.created_at as order_created, 
-        o.status AS order_status
-    FROM deliveries d
-    LEFT JOIN orders o ON d.order_id = o.id
-    WHERE $where_sql
-    ORDER BY d.created_at DESC
-    LIMIT $limit OFFSET $offset
+// Isang delivery row bawat order (pinakaluma), para walang doble
+$from = "
+    FROM orders o
+    LEFT JOIN users u ON u.id = o.user_id
+    LEFT JOIN (SELECT order_id, MAX(delivery_date) AS delivery_date FROM deliveries GROUP BY order_id) d ON d.order_id = o.id
 ";
-$stmt = $pdo->prepare($sql);
-$stmt->execute($params);
-$deliveries = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$searchSql = '';
+$searchParams = [];
+if ($search !== '') {
+    $searchSql = ' AND (o.id = ? OR o.customer_name LIKE ? OR u.name LIKE ? OR o.address LIKE ?)';
+    $searchParams = [ctype_digit(ltrim($search, '#')) ? (int)ltrim($search, '#') : 0, "%{$search}%", "%{$search}%", "%{$search}%"];
+}
+
+// Bilang bawat view
+$counts = [];
+foreach ($views as $k => [, $sql, $p]) {
+    $c = $pdo->prepare("SELECT COUNT(*) {$from} WHERE {$sql}{$searchSql}");
+    $c->execute(array_merge($p, $searchParams));
+    $counts[$k] = (int)$c->fetchColumn();
+}
+// Kapag walang overdue, buksan ang unang may laman
+if (!isset($_GET['view']) && $counts['overdue'] === 0) {
+    foreach (['today', 'upcoming', 'unscheduled', 'later', 'delivered'] as $k) {
+        if ($counts[$k]) { $view = $k; break; }
+    }
+}
+
+[$viewLabel, $viewSql, $viewParams] = $views[$view];
+$total = $counts[$view];
+$totalPages = max(1, (int)ceil($total / $limit));
+$page = min($page, $totalPages);
+$offset = ($page - 1) * $limit;
+$order = $view === 'delivered' ? 'd.delivery_date DESC, o.id DESC' : ($view === 'unscheduled' ? 'o.created_at ASC' : 'd.delivery_date ASC, o.id ASC');
+
+$stmt = $pdo->prepare("
+    SELECT o.id, o.status, o.total, o.address, o.customer_name, o.phone_number, o.created_at, o.payment_terms, o.order_type,
+           u.name AS account_name, u.role, d.delivery_date,
+           (SELECT SUM(quantity) FROM order_items WHERE order_id = o.id) AS units
+    {$from}
+    WHERE {$viewSql}{$searchSql}
+    ORDER BY {$order}
+    LIMIT {$limit} OFFSET {$offset}
+");
+$stmt->execute(array_merge($viewParams, $searchParams));
+$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$url = function (array $changes = []) use ($view, $search, $page) {
+    $q = array_filter(array_merge(['view' => $view, 'q' => $search, 'page' => $page > 1 ? $page : null], $changes),
+        fn($v) => $v !== null && $v !== '');
+    return 'deliveries.php' . ($q ? '?' . http_build_query($q) : '');
+};
+
+require_once __DIR__ . '/../includes/header.php';
 ?>
 
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
-
-:root {
-    --primary: #2563eb; --primary-soft: #eff6ff;
-    --success: #10b981; --warning: #f59e0b;
-    --danger: #ef4444; --dark: #0f172a;
-    --text-sub: #64748b; --bg: #f1f5f9;
-    --card-bg: #ffffff; --border: #e2e8f0;
-    --radius: 12px;
-}
-body { font-family: 'Plus Jakarta Sans', sans-serif; background: var(--bg); color: var(--dark); }
-
-.dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; margin-bottom: 30px; }
-.hud-card { background: var(--card-bg); padding: 24px; border-radius: var(--radius); border: 1px solid var(--border); display: flex; align-items: center; gap: 16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
-.hud-icon { width: 48px; height: 48px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; }
-.hud-icon.blue { background: var(--primary-soft); color: var(--primary); }
-.hud-icon.red { background: #fef2f2; color: var(--danger); }
-.hud-icon.green { background: #ecfdf5; color: var(--success); }
-.hud-info h4 { margin: 0; font-size: 0.9rem; color: var(--text-sub); font-weight: 500; }
-.hud-info span { font-size: 1.5rem; font-weight: 800; display: block; margin-top: 4px; }
-
-.action-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; margin-bottom: 20px; background: var(--card-bg); padding: 15px 20px; border-radius: var(--radius); border: 1px solid var(--border); }
-.filter-group { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; flex: 1; }
-.form-select { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem; outline: none; background: #fff; cursor: pointer; }
-.search-box { position: relative; flex: 1; min-width: 200px; }
-.search-box input { width: 100%; padding: 10px 15px 10px 40px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem; outline: none; }
-.search-box i { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--text-sub); }
-
-.table-container { background: var(--card-bg); border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05); }
-.smart-table { width: 100%; border-collapse: collapse; }
-.smart-table thead { background: #f8fafc; border-bottom: 1px solid var(--border); }
-.smart-table th { padding: 16px; text-align: left; font-size: 0.75rem; text-transform: uppercase; color: var(--text-sub); font-weight: 700; letter-spacing: 0.05em; }
-.smart-table td { padding: 16px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-
-/* Desktop Actions column: right-aligned single row */
-.smart-table td.actions-cell {
-    white-space: nowrap;
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    gap: 8px;
-}
-.smart-table td.actions-cell a {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-}
-
-/* Status badges */
-.status-badge {
-    padding: 6px 12px;
-    border-radius: 6px;
-    font-size: 0.85rem;
-    font-weight: 700;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-}
-.badge-pending   { background: #fefce8; color: #a16207; border: 1px solid #fde047; }
-.badge-preparing { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
-.badge-delivered { background: #f0fdf4; color: #15803d; border: 1px solid #86efac; }
-.badge-cancelled { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
-
-.badge-b2b { background: #7e22ce; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 700; display: inline-block; margin-right: 5px; }
-.badge-terms { background: #f3e8ff; color: #7e22ce; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; display: inline-block; }
-.customer-meta { display: flex; flex-direction: column; }
-.customer-name { font-weight: 600; color: var(--dark); }
-
-/* Mobile: 1 card per order, aligned labels & values */
-@media (max-width: 768px) {
-    .dashboard-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .smart-table,
-    .smart-table thead,
-    .smart-table tbody,
-    .smart-table th,
-    .smart-table td,
-    .smart-table tr {
-        display: block;
-        width: 100%;
-    }
-
-    .smart-table thead {
-        display: none;
-    }
-
-    .smart-table tr {
-        margin-bottom: 15px;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: #ffffff;
-        overflow: hidden;
-    }
-
-    .smart-table td {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-        text-align: left;
-        padding: 10px 16px;
-        border-bottom: 1px solid #f1f5f9;
-        position: relative;
-        padding-left: 16px;
-    }
-
-    .smart-table td:last-child {
-        border-bottom: none;
-    }
-
-    .smart-table td::before {
-        content: attr(data-label);
-        flex: 0 0 40%;
-        max-width: 40%;
-        font-weight: 600;
-        color: var(--text-sub);
-        font-size: 0.8rem;
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-    }
-
-    .smart-table td > * {
-        margin-left: auto;
-    }
-
-    .smart-table td > div,
-    .smart-table td > span {
-        flex: 1;
-        text-align: right;
-        font-size: 0.9rem;
-    }
-
-    .customer-meta {
-        align-items: flex-end;
-    }
-
-    .customer-name {
-        width: 100%;
-        text-align: right;
-    }
-
-    .status-badge {
-        justify-content: flex-end;
-        width: 100%;
-    }
-
-    .smart-table td.actions-cell {
-        justify-content: flex-end;
-    }
-}
-
-.pagination {
-    margin-top: 15px;
-    display: flex;
-    gap: 6px;
-    justify-content: center;
-    align-items: center;
-}
-.page-link {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 6px 10px;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    color: var(--text-sub);
-    text-decoration: none;
-    font-size: 0.85rem;
-}
-.page-link.active {
-    background: var(--primary);
-    color: #fff;
-    border-color: var(--primary);
-}
-.page-link.disabled {
-    pointer-events: none;
-    opacity: 0.5;
-}
+/* ============================================================
+   DELIVERIES (Phase 9f) — tokens + sx-table / sx-chip / sx-pill mula sa assets/style.css
+   ============================================================ */
+.dl { max-width: 1440px; padding-block: var(--sx-space-5) var(--sx-space-8); }
+.dl-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--sx-space-3); margin-bottom: var(--sx-space-5); }
+.dl-head p { margin: var(--sx-space-2) 0 0; color: var(--sx-muted); }
+.dl-kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sx-space-3); margin-bottom: var(--sx-space-4); }
+.dl-kpi { padding: var(--sx-space-4); color: inherit; text-decoration: none; border: 2px solid transparent; }
+.dl-kpi span { display: block; font-size: var(--sx-text-xs); font-weight: var(--sx-weight-semibold); color: var(--sx-muted); }
+.dl-kpi strong { display: block; margin-top: 4px; font-size: 1.6rem; font-weight: var(--sx-weight-extrabold); color: var(--sx-dark); }
+.dl-kpi.active { border-color: var(--sx-primary); }
+.dl-kpi.danger strong { color: var(--sx-status-cancelled); }
+.dl-kpi.warn strong { color: var(--sx-status-pending); }
+.dl-bar { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--sx-space-3); margin-bottom: var(--sx-space-4); }
+.dl-chips { display: flex; flex-wrap: wrap; gap: var(--sx-space-2); }
+.dl-chips .sx-chip span { margin-left: 4px; opacity: 0.7; }
+.dl-search { display: flex; gap: var(--sx-space-2); flex: 1 1 280px; max-width: 420px; }
+.dl-search .sx-input { flex: 1; min-width: 0; }
+.dl-table tbody tr { cursor: pointer; }
+.dl-table .muted { color: var(--sx-muted); font-size: var(--sx-text-sm); }
+.dl-table .num { text-align: right; white-space: nowrap; }
+.dl-date { font-weight: var(--sx-weight-bold); white-space: nowrap; }
+.dl-date.late { color: var(--sx-status-cancelled); }
+.dl-date small { display: block; font-weight: var(--sx-weight-medium); color: var(--sx-muted); }
+.dl-id { font-weight: var(--sx-weight-bold); color: var(--sx-dark); text-decoration: none; }
+.dl-id:hover { color: var(--sx-primary); }
+.dl-tag { margin-left: 6px; padding: 1px 6px; border-radius: var(--sx-radius-pill); background: var(--sx-primary-soft); color: var(--sx-primary); font-size: 10px; font-weight: var(--sx-weight-bold); }
+.dl-who strong { display: block; color: var(--sx-dark); }
+.dl-who small { display: block; max-width: 340px; overflow: hidden; color: var(--sx-muted); text-overflow: ellipsis; white-space: nowrap; }
+@media (min-width: 768px) { .dl-kpis { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 767.98px) { .dl-table .hide-sm { display: none; } }
 </style>
 
-<div style="max-width: 1400px; margin: 0 auto; padding: 30px 20px;">
-    
-    <div style="margin-bottom: 30px;">
-        <h1 style="font-weight: 800; margin-bottom: 5px;">Logistics Command Center</h1>
-        <p style="color: var(--text-sub);">Real-time tracking and intelligent ETA.</p>
+<div class="dl sx-container">
+    <div class="dl-head">
+        <div>
+            <span class="sx-eyebrow">Logistics</span>
+            <h1 class="sx-heading-lg">Deliveries</h1>
+            <p>Open orders by delivery date. Set dates and statuses on each order.</p>
+        </div>
+        <a href="allorders.php" class="sx-btn sx-btn-outline sx-btn-sm"><i class="fa-solid fa-bag-shopping"></i> All orders</a>
     </div>
 
-    <div class="dashboard-grid">
-        <div class="hud-card">
-            <div class="hud-icon blue"><i class="fa-solid fa-box-open"></i></div>
-            <div class="hud-info">
-                <h4>Total Active</h4>
-                <span><?php echo number_format($metrics['active_count'] ?? 0); ?></span>
-            </div>
-        </div>
-        <div class="hud-card">
-            <div class="hud-icon green"><i class="fa-solid fa-sack-dollar"></i></div>
-            <div class="hud-info">
-                <h4>Total Revenue</h4>
-                <span>₱<?php echo number_format($metrics['total_revenue'] ?? 0, 0); ?></span>
-            </div>
-        </div>
-        <div class="hud-card">
-            <div class="hud-icon red"><i class="fa-solid fa-triangle-exclamation"></i></div>
-            <div class="hud-info">
-                <h4>Risk (Delayed >3 Days)</h4>
-                <span><?php echo number_format($metrics['risk_count'] ?? 0); ?></span>
-            </div>
-        </div>
+    <div class="dl-kpis">
+        <a href="<?= h($url(['view' => 'overdue', 'page' => null])) ?>" class="sx-card dl-kpi danger<?= $view === 'overdue' ? ' active' : '' ?>"><span>Overdue</span><strong><?= $counts['overdue'] ?></strong></a>
+        <a href="<?= h($url(['view' => 'today', 'page' => null])) ?>" class="sx-card dl-kpi warn<?= $view === 'today' ? ' active' : '' ?>"><span>Due today</span><strong><?= $counts['today'] ?></strong></a>
+        <a href="<?= h($url(['view' => 'upcoming', 'page' => null])) ?>" class="sx-card dl-kpi<?= $view === 'upcoming' ? ' active' : '' ?>"><span>Next 7 days</span><strong><?= $counts['upcoming'] ?></strong></a>
+        <a href="<?= h($url(['view' => 'unscheduled', 'page' => null])) ?>" class="sx-card dl-kpi<?= $view === 'unscheduled' ? ' active' : '' ?>"><span>No date yet</span><strong><?= $counts['unscheduled'] ?></strong></a>
     </div>
 
-    <div class="action-toolbar">
-        <form method="get" class="filter-group" id="filterForm">
-            <div class="search-box">
-                <i class="fa-solid fa-magnifying-glass"></i>
-                <input type="text" name="search" value="<?php echo htmlspecialchars($search_query); ?>" placeholder="Search customer, PO#, or ID...">
-            </div>
-            
-            <?php if(!empty($search_query) || !empty($filter_status) || !empty($filter_year)): ?>
-                <a href="deliveries.php" class="btn btn-sm btn-light" style="border:1px solid #ddd; color:#666;">❌ Clear</a>
-            <?php endif; ?>
-            
-            <select name="status" class="form-select" onchange="this.form.submit()">
-                <option value="">All Statuses</option>
-                <option value="pending"   <?php if($filter_status=='pending')   echo 'selected'; ?>>Pending</option>
-                <option value="preparing" <?php if($filter_status=='preparing') echo 'selected'; ?>>Preparing</option>
-                <option value="delivered" <?php if($filter_status=='delivered') echo 'selected'; ?>>Delivered</option>
-                <option value="completed" <?php if($filter_status=='completed') echo 'selected'; ?>>Completed</option>
-                <option value="cancelled" <?php if($filter_status=='cancelled') echo 'selected'; ?>>Cancelled</option>
-            </select>
-
-            <select name="year" class="form-select" onchange="this.form.submit()">
-                <option value="">All Years</option>
-                <?php 
-                $currentYear = date('Y');
-                for($y = $currentYear; $y >= $currentYear - 2; $y--) {
-                    $sel = ($filter_year == $y) ? 'selected' : '';
-                    echo "<option value='$y' $sel>$y</option>";
-                }
-                ?>
-            </select>
-            <select name="month" class="form-select" onchange="this.form.submit()">
-                <option value="">All Months</option>
-                <?php 
-                for($m=1; $m<=12; $m++) {
-                    $mName = date('F', mktime(0,0,0,$m,1));
-                    $sel   = ($filter_month == $m) ? 'selected' : '';
-                    echo "<option value='$m' $sel>$mName</option>";
-                }
-                ?>
-            </select>
-            <button type="submit" style="display:none;"></button>
-        </form>
-        
-        <button class="btn btn-dark" style="background:var(--dark); color:#fff; border-radius:8px; padding: 10px 20px;">
-            <i class="fa-solid fa-file-export me-2"></i> Export
-        </button>
-    </div>
-
-    <div class="table-container">
-        <table class="smart-table" id="deliveryTable">
-            <thead>
-                <tr>
-                    <th>Tracking</th>
-                    <th>Customer & Terms</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-            <?php foreach ($deliveries as $d): ?>
-                <?php 
-                    $created_date = new DateTime($d['order_created']);
-
-                    $db_status = strtolower($d['status'] ?? '');
-                    if ($db_status === '' || $db_status === '0') $db_status = 'pending';
-                    $ui_status = ($db_status === 'shipped') ? 'preparing' : $db_status;
-
-                    $badgeClass = match($ui_status) {
-                        'pending'   => 'badge-pending',
-                        'preparing' => 'badge-preparing',
-                        'delivered' => 'badge-delivered',
-                        'completed' => 'badge-delivered',
-                        'cancelled' => 'badge-cancelled',
-                        default     => 'badge-pending'
-                    };
-
-                    $statusIcon = match($ui_status) {
-                        'pending'               => 'fa-clock',
-                        'preparing'             => 'fa-box-open',
-                        'delivered', 'completed'=> 'fa-check-circle',
-                        'cancelled'             => 'fa-times-circle',
-                        default                 => 'fa-circle-question'
-                    };
-
-                    $daysToAdd = 5;
-                    $terms = strtolower($d['payment_terms'] ?? '');
-                    if (strpos($terms, '30') !== false) { $daysToAdd = 30; }
-                    elseif (strpos($terms, '45') !== false) { $daysToAdd = 45; }
-                    elseif (strpos($terms, '60') !== false) { $daysToAdd = 60; }
-                    elseif ($ui_status == 'preparing') { $daysToAdd = 3; }
-                    if ($ui_status == 'delivered' || $ui_status == 'completed') $daysToAdd = 0;
-
-                    $etaDate = clone $created_date;
-                    $etaDate->modify("+$daysToAdd days");
-                    $today = new DateTime();
-
-                    $etaText  = $etaDate->format('M j');
-                    $etaColor = "var(--text-sub)";
-
-                    if ($ui_status != 'delivered' && $ui_status != 'completed' && $ui_status != 'cancelled') {
-                        if ($today > $etaDate) {
-                            $etaColor = "var(--danger)";
-                            $etaText .= " (Delayed)";
-                        } else {
-                            $etaColor = "var(--success)";
-                            $etaText .= " (On Time)";
-                        }
-                    } else {
-                        $etaText = "Completed";
-                    }
-
-                    $poNumber     = $d['po_number'] ?? '';
-                    $paymentTerms = $d['payment_terms'] ?? '';
-                    $isB2B        = !empty($poNumber);
-                    $displayName  = !empty($d['order_name']) ? $d['order_name'] : $d['delivery_name'];
-                ?>
-                <tr>
-                    <td data-label="Tracking">
-                        <div style="font-weight:700;">#<?php echo htmlspecialchars($d['id']); ?></div>
-                        <div style="font-size:0.8rem; color:var(--text-sub);">
-                            <?php echo $d['created_at'] ? date('M j, H:i', strtotime($d['created_at'])) : '-'; ?>
-                        </div>
-                    </td>
-                    <td data-label="Customer & Terms">
-                        <div class="customer-meta">
-                            <span class="customer-name">
-                                <?php if($isB2B): ?>
-                                    <span class="badge-b2b">PO: <?php echo htmlspecialchars($poNumber); ?></span>
-                                <?php endif; ?>
-                                <?php echo htmlspecialchars($displayName); ?>
-                            </span>
-                            <span style="font-size:0.75rem; color:<?php echo $etaColor; ?>; font-weight:700; display:flex; align-items:center; gap:4px; margin-top:2px;">
-                                <i class="fa-regular fa-calendar"></i> ETA: <?php echo $etaText; ?>
-                            </span>
-                            <?php if(!empty($paymentTerms)): ?>
-                                <span style="margin-top:2px;">
-                                    <span class="badge-terms"><?php echo htmlspecialchars($paymentTerms); ?></span>
-                                </span>
-                            <?php endif; ?>
-                            <span style="font-size:0.8rem; color:var(--text-sub); margin-top:2px;">
-                                Order #<?php echo htmlspecialchars($d['order_id']); ?>
-                            </span>
-                        </div>
-                    </td>
-                    <td data-label="Status">
-                        <span class="status-badge <?php echo $badgeClass; ?>">
-                            <i class="fa-solid <?php echo $statusIcon; ?>"></i>
-                            <?php echo ucfirst($ui_status); ?>
-                        </span>
-                    </td>
-                    <td data-label="Actions" class="actions-cell">
-                        <a href="AdminReceipt.php?order_id=<?php echo $d['order_id']; ?>" 
-                           style="color:#64748b; text-decoration:none; font-weight:600; font-size:0.9rem; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px;"
-                           title="Print Admin Sales Receipt" target="_blank">
-                            <i class="fa-solid fa-receipt"></i> Receipt
-                        </a>
-                        <a href="order_details_deliveries.php?id=<?php echo $d['order_id']; ?>" 
-                           style="color:var(--primary); text-decoration:none; font-weight:600; font-size:0.9rem; padding: 6px 8px; border: 1px solid var(--primary); background: var(--primary-soft); border-radius: 6px;"
-                           title="View Order Details">
-                            <i class="fa-solid fa-eye"></i> View
-                        </a>
-                    </td>
-                </tr>
+    <div class="dl-bar">
+        <nav class="dl-chips" aria-label="Delivery views">
+            <?php foreach ($views as $k => [$label]): ?>
+                <a href="<?= h($url(['view' => $k, 'page' => null])) ?>" class="sx-chip<?= $view === $k ? ' active' : '' ?>"><?= $label ?> <span><?= $counts[$k] ?></span></a>
             <?php endforeach; ?>
-            </tbody>
-        </table>
-        
-        <?php if(empty($deliveries)): ?>
-            <div style="padding:40px; text-align:center; color:var(--text-sub);">
-                <i class="fa-solid fa-inbox" style="font-size:2rem; margin-bottom:10px; opacity:0.3;"></i>
-                <p>No deliveries found.</p>
-            </div>
-        <?php endif; ?>
+        </nav>
+        <form method="get" class="dl-search" role="search">
+            <input type="hidden" name="view" value="<?= h($view) ?>">
+            <input type="search" name="q" class="sx-input" placeholder="Order #, customer or address…" value="<?= h($search) ?>" aria-label="Search deliveries">
+            <button type="submit" class="sx-btn sx-btn-dark sx-btn-sm" aria-label="Search"><i class="fa-solid fa-magnifying-glass"></i></button>
+        </form>
     </div>
 
-    <?php if ($total_pages > 1): ?>
-    <div class="pagination">
-        <a href="?page=<?= max(1, $page-1) ?>&year=<?= $filter_year ?>&month=<?= $filter_month ?>&status=<?= $filter_status ?>&search=<?= urlencode($search_query) ?>" 
-           class="page-link <?= ($page <= 1) ? 'disabled' : '' ?>">
-           <i class="fa-solid fa-chevron-left"></i>
-        </a>
-        <?php for($i = 1; $i <= $total_pages; $i++): ?>
-            <a href="?page=<?= $i ?>&year=<?= $filter_year ?>&month=<?= $filter_month ?>&status=<?= $filter_status ?>&search=<?= urlencode($search_query) ?>" 
-               class="page-link <?= ($page == $i) ? 'active' : '' ?>">
-               <?= $i ?>
-            </a>
-        <?php endfor; ?>
-        <a href="?page=<?= min($total_pages, $page+1) ?>&year=<?= $filter_year ?>&month=<?= $filter_month ?>&status=<?= $filter_status ?>&search=<?= urlencode($search_query) ?>" 
-           class="page-link <?= ($page >= $total_pages) ? 'disabled' : '' ?>">
-           <i class="fa-solid fa-chevron-right"></i>
-        </a>
-    </div>
+    <?php if ($rows): ?>
+        <div class="sx-card" style="padding: 0; overflow: hidden">
+            <div class="sx-table-wrap" style="border: 0; border-radius: 0">
+                <table class="sx-table dl-table">
+                    <thead>
+                        <tr>
+                            <th>Delivery</th>
+                            <th>Order</th>
+                            <th>Customer &amp; address</th>
+                            <th class="num hide-sm">Units</th>
+                            <th class="num hide-sm">Total</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($rows as $r):
+                            $link = 'order_details.php?id=' . (int)$r['id'] . '&from=deliveries';
+                            $late = $r['delivery_date'] && $r['delivery_date'] < $today && $view !== 'delivered';
+                            $days = $r['delivery_date'] ? (int)round((strtotime($r['delivery_date']) - strtotime($today)) / 86400) : null;
+                        ?>
+                            <tr data-href="<?= h($link) ?>">
+                                <td class="dl-date<?= $late ? ' late' : '' ?>">
+                                    <?php if ($r['delivery_date']): ?>
+                                        <?= date('M j, Y', strtotime($r['delivery_date'])) ?>
+                                        <?php if ($view !== 'delivered'): ?>
+                                            <small><?= $days === 0 ? 'Today' : ($days < 0 ? abs($days) . ' day' . (abs($days) === 1 ? '' : 's') . ' late' : 'in ' . $days . ' day' . ($days === 1 ? '' : 's')) ?></small>
+                                        <?php endif; ?>
+                                    <?php else: ?>
+                                        <span class="muted">Not set</span>
+                                        <small>Ordered <?= date('M j', strtotime($r['created_at'])) ?></small>
+                                    <?php endif; ?>
+                                </td>
+                                <td style="white-space: nowrap">
+                                    <a href="<?= h($link) ?>" class="dl-id">#<?= (int)$r['id'] ?></a>
+                                    <?php if ($r['order_type'] === 'B2B' || $r['status'] === 'Pending PO' || $r['role'] === 'business'): ?><span class="dl-tag">PO</span><?php endif; ?>
+                                </td>
+                                <td class="dl-who">
+                                    <strong><?= h($r['customer_name'] ?: ($r['account_name'] ?: 'Guest')) ?></strong>
+                                    <small title="<?= h($r['address']) ?>"><?= h($r['address'] ?: 'No address') ?><?= $r['phone_number'] ? ' · ' . h($r['phone_number']) : '' ?></small>
+                                </td>
+                                <td class="num hide-sm"><?= (int)$r['units'] ?></td>
+                                <td class="num hide-sm">₱<?= number_format((float)$r['total'], 2) ?></td>
+                                <td><?= sx_order_status_pill($r['status']) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="ap-pager">
+            <span>Showing <?= $offset + 1 ?>–<?= $offset + count($rows) ?> of <?= $total ?></span>
+            <?php if ($totalPages > 1): ?>
+                <nav aria-label="Pages">
+                    <?php if ($page > 1): ?><a href="<?= h($url(['page' => $page - 1])) ?>" aria-label="Previous page"><i class="fa-solid fa-chevron-left"></i></a><?php endif; ?>
+                    <?php for ($i = max(1, $page - 2); $i <= min($totalPages, $page + 2); $i++): ?>
+                        <?php if ($i === $page): ?><span class="cur" aria-current="page"><?= $i ?></span>
+                        <?php else: ?><a href="<?= h($url(['page' => $i])) ?>"><?= $i ?></a><?php endif; ?>
+                    <?php endfor; ?>
+                    <?php if ($page < $totalPages): ?><a href="<?= h($url(['page' => $page + 1])) ?>" aria-label="Next page"><i class="fa-solid fa-chevron-right"></i></a><?php endif; ?>
+                </nav>
+            <?php endif; ?>
+        </div>
+    <?php else: ?>
+        <div class="sx-card sx-empty">
+            <i class="fa-solid fa-truck"></i>
+            <h3>Nothing in “<?= h($viewLabel) ?>”</h3>
+            <p><?= $search ? 'Try a different search.' : 'Pick another view above.' ?></p>
+        </div>
     <?php endif; ?>
 </div>
 
 <script>
-function filterTable() {
-    let input = document.getElementById("deliverySearch");
-    if (!input) return;
-    let filter = input.value.toUpperCase();
-    let table = document.getElementById("deliveryTable");
-    let tr = table.getElementsByTagName("tr");
-    for (let i = 1; i < tr.length; i++) {
-        let txtValue = tr[i].textContent || tr[i].innerText;
-        tr[i].style.display = (txtValue.toUpperCase().indexOf(filter) > -1) ? "" : "none";
-    }
-}
+document.querySelectorAll('.dl-table tr[data-href]').forEach((tr) => tr.addEventListener('click', (e) => {
+    if (!e.target.closest('a')) window.location.href = tr.dataset.href;
+}));
 </script>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>

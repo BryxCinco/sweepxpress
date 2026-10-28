@@ -25,11 +25,17 @@ function notifyCustomerOrderStatus($orderId, $newStatus, $pdo) {
         }
 
         // Email Subject + Body
+        // Escaped: galing sa customer ang pangalan; label sa halip na raw status (hal. "Pending PO")
+        $labels = ['Pending PO' => 'PO under review', 'cancellation_requested' => 'Cancellation requested'];
+        $name   = htmlspecialchars($order['customer_name'] ?: 'Customer', ENT_QUOTES, 'UTF-8');
+        $label  = htmlspecialchars($labels[$newStatus] ?? ucfirst($newStatus), ENT_QUOTES, 'UTF-8');
+        $orderId = (int)$orderId;
+
         $subject = "Your Order #$orderId Status Update";
         $body = "
-            Hi {$order['customer_name']},<br><br>
+            Hi {$name},<br><br>
             Your order <strong>#$orderId</strong> status has been updated to:<br>
-            <h2 style='color:#06b6d4; text-transform:uppercase;'>$newStatus</h2>
+            <h2 style='color:#1e3a8a; text-transform:uppercase;'>$label</h2>
             <br>
             Thank you for choosing SweepXpress!
         ";
