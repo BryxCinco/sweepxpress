@@ -120,7 +120,7 @@ require_once __DIR__ . '/../includes/header.php';
     font-size: var(--sx-text-xs);
     text-align: center;
 }
-.mo-tabs .sx-chip.active span { background: rgba(255, 255, 255, 0.2); color: inherit; }
+.mo-tabs .sx-chip.active span { background: color-mix(in srgb, var(--sx-on-dark) 20%, transparent); color: inherit; }
 
 /* Order card */
 .mo-list { display: grid; gap: var(--sx-space-4); }

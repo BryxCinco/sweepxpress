@@ -169,7 +169,7 @@ require_once __DIR__ . '/../includes/header.php';
 .od-head p { margin: var(--sx-space-2) 0 0; color: var(--sx-muted); }
 .od-head-actions { display: flex; flex-wrap: wrap; gap: var(--sx-space-2); }
 .od-alerts { display: grid; gap: var(--sx-space-3); margin-bottom: var(--sx-space-5); }
-.od-alert-note { margin-top: var(--sx-space-2); padding: var(--sx-space-2) var(--sx-space-3); border-radius: var(--sx-radius-md); background: rgba(255, 255, 255, 0.6); color: var(--sx-dark); white-space: pre-wrap; }
+.od-alert-note { margin-top: var(--sx-space-2); padding: var(--sx-space-2) var(--sx-space-3); border-radius: var(--sx-radius-md); background: color-mix(in srgb, var(--sx-surface) 60%, transparent); color: var(--sx-dark); white-space: pre-wrap; }
 .od-alert .sx-btn { margin-top: var(--sx-space-3); }
 
 /* Progress tracker */
@@ -199,7 +199,7 @@ require_once __DIR__ . '/../includes/header.php';
 .od-step strong { font-size: var(--sx-text-sm); color: var(--sx-muted); }
 .od-step small { min-height: 1.2em; font-size: var(--sx-text-xs); color: var(--sx-muted); }
 .od-step.done::before { background: var(--sx-accent); }
-.od-step.done .od-step-dot { border-color: var(--sx-accent); background: var(--sx-accent); color: #fff; }
+.od-step.done .od-step-dot { border-color: var(--sx-accent); background: var(--sx-accent); color: var(--sx-on-accent); }
 .od-step.done strong { color: var(--sx-dark); }
 .od-step.current .od-step-dot { box-shadow: 0 0 0 5px var(--sx-accent-soft); }
 .od-track.is-cancelled .od-step.done::before,

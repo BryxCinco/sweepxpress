@@ -117,12 +117,7 @@ if (is_admin()) {
     overflow: hidden;
     transform: translateX(-105%);
     transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
-    /* Neutralize ang lumang .sidebar rules sa style.css */
-    padding-top: 0;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
 }
-.sidebar::before { content: none; }
 .sidebar.active {
     transform: translateX(0);
     box-shadow: var(--sx-shadow-lg);
@@ -142,7 +137,6 @@ if (is_admin()) {
     gap: 0.55rem;
     font-size: 1.25rem;
     text-decoration: none;
-    margin-left: 0;                 /* lumang "nav a" rule */
 }
 .sidebar-close {
     display: inline-grid;

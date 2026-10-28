@@ -283,3 +283,39 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 });
 
+
+/* -------------------------------
+   Dark mode (Phase 9h)
+   Unang tema: includes/theme_init.php sa <head>. Dito ang toggle at ang pag-alala.
+   ------------------------------- */
+function sxSetTheme(theme, remember) {
+    const root = document.documentElement;
+    root.setAttribute("data-theme", theme);
+    root.setAttribute("data-bs-theme", theme);
+    document.querySelectorAll("[data-sx-theme-toggle]").forEach((btn) => {
+        btn.setAttribute("aria-pressed", theme === "dark" ? "true" : "false");
+        btn.setAttribute("aria-label", theme === "dark" ? "Switch to light mode" : "Switch to dark mode");
+    });
+    if (remember) {
+        try { localStorage.setItem("sx-theme", theme); } catch (e) {}
+    }
+}
+
+document.addEventListener("click", (e) => {
+    if (!e.target.closest("[data-sx-theme-toggle]")) return;
+    sxSetTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark", true);
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+    sxSetTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light", false);
+
+    // Sundan ang device kapag hindi pa pumipili ang user
+    const media = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+    if (media && media.addEventListener) {
+        media.addEventListener("change", (e) => {
+            let saved = null;
+            try { saved = localStorage.getItem("sx-theme"); } catch (err) {}
+            if (saved !== "light" && saved !== "dark") sxSetTheme(e.matches ? "dark" : "light", false);
+        });
+    }
+});

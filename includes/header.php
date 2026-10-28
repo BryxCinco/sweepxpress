@@ -7,6 +7,7 @@ require_once __DIR__ . '/../config.php';
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SweepXpress</title>
+<?php require __DIR__ . '/theme_init.php'; ?>
 
     <!-- Font: Plus Jakarta Sans (iisang font ng buong site) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -15,15 +16,12 @@ require_once __DIR__ . '/../config.php';
 
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-    <!-- PANSAMANTALA: ginagamit pa ng 16 file; aalisin sa Phase 9 kapag Font Awesome na lahat -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
     <!-- Huling CSS para ang design tokens at sx- components ang masunod -->
     <link rel="stylesheet" href="/sweepxpress/assets/style.css?v=<?= filemtime(__DIR__ . '/../assets/style.css') ?>">
     <link rel="icon" type="image/png" sizes="32x32" href="/sweepxpress/assets/brand/favicon-32.png">
     <link rel="apple-touch-icon" href="/sweepxpress/assets/brand/apple-touch-icon.png">
 
     <style>
-        /* (CSS is omitted for brevity, it remains the same as previously provided) */
         * {
             margin: 0;
             padding: 0;
@@ -70,9 +68,6 @@ require_once __DIR__ . '/../config.php';
             box-shadow: var(--sx-shadow-md);
         }
         .navbar-scrolled::after { opacity: 1; }
-        /* Neutralize ang lumang "nav a" rule sa style.css (margin-left + opacity sa hover) */
-        .navbar a { margin-left: 0; }
-        .navbar a:hover { opacity: 1; }
 
         /* Brand: logo mark + gradient wordmark (.sx-logo-mark / .sx-wordmark sa style.css) */
         .navbar-brand {
@@ -163,10 +158,11 @@ require_once __DIR__ . '/../config.php';
             object-fit: cover;
         }
 
-        /* Icon buttons: cart, sidebar burger, guest menu */
+        /* Icon buttons: cart, sidebar burger, guest menu, dark mode */
         .cart-link,
         #sidebarToggle,
-        .navbar-toggler {
+        .navbar-toggler,
+        .sx-theme-toggle {
             position: relative;
             display: inline-flex;
             align-items: center;
@@ -186,7 +182,8 @@ require_once __DIR__ . '/../config.php';
         }
         .cart-link:hover,
         #sidebarToggle:hover,
-        .navbar-toggler:hover {
+        .navbar-toggler:hover,
+        .sx-theme-toggle:hover {
             color: var(--sx-primary);
             background: var(--sx-primary-soft);
             border-color: color-mix(in srgb, var(--sx-primary) 20%, transparent);
@@ -237,7 +234,7 @@ require_once __DIR__ . '/../config.php';
             width: 40px;
             height: 40px;
             border-radius: 50%;
-            background: rgba(255, 255, 255, 0.98);
+            background: var(--sx-surface);
             box-shadow: 0 4px 16px color-mix(in srgb, var(--sx-primary) 20%, transparent);
         }
         .ptr-spinner::before {
@@ -443,6 +440,9 @@ $sxCurrentPage = basename($_SERVER['SCRIPT_NAME'] ?? '');
         <?php endif; ?>
 
         <div class="header-right d-flex align-items-center gap-2 ms-auto">
+            <button type="button" class="sx-theme-toggle" data-sx-theme-toggle aria-label="Switch to dark mode" aria-pressed="false">
+                <i class="fa-solid fa-moon"></i><i class="fa-solid fa-sun"></i>
+            </button>
             <?php if (is_logged_in()): ?>
                 <button class="mobile-profile-avatar"
                         type="button"

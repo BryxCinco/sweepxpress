@@ -13,6 +13,7 @@ if (!function_exists('sx_auth_start')) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= $esc($title) ?> · SweepXpress</title>
+<?php require __DIR__ . '/theme_init.php'; ?>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -47,6 +48,9 @@ if (!function_exists('sx_auth_start')) {
                 <span class="sx-logo-mark" aria-hidden="true"><img src="/sweepxpress/assets/brand/logo-256.png" alt=""></span>
                 <span class="sx-wordmark">Sweep<span class="sx-wordmark-x">X</span>press</span>
             </a>
+            <button type="button" class="sx-btn sx-btn-ghost sx-btn-sm sx-theme-toggle" data-sx-theme-toggle aria-label="Switch to dark mode" aria-pressed="false">
+                <i class="fa-solid fa-moon"></i><i class="fa-solid fa-sun"></i>
+            </button>
         </div>
         <div class="sx-auth-card">
         <?php

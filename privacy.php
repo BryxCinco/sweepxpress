@@ -1,21 +1,20 @@
 <?php
+// privacy.php — Privacy Policy. Layout: .sx-legal sa assets/style.css (kapareho ng terms.php).
 require_once __DIR__ . '/includes/header.php';
 ?>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Privacy Policy - SweepXpress</title>
-    <link rel="stylesheet" href="styles.css"> <!-- same CSS na gamit sa system mo -->
-    
-</head>
-<body>
-    <div class="container">
-        <h1>Privacy Policy</h1>
-        <p><strong>Last Updated:</strong> May 05, 2025</p>
+<div class="sx-legal sx-container">
+    <header class="sx-legal-head">
+        <span class="sx-eyebrow">Legal</span>
+        <h1 class="sx-heading-lg">Privacy Policy</h1>
+        <p>Last updated: May 5, 2025</p>
+        <nav class="sx-legal-tabs" aria-label="Legal pages">
+            <a href="/sweepxpress/privacy.php" class="sx-chip active" aria-current="page">Privacy Policy</a>
+            <a href="/sweepxpress/terms.php" class="sx-chip">Terms &amp; Conditions</a>
+        </nav>
+    </header>
 
+    <article class="sx-card sx-legal-doc">
         <h2>1. Introduction</h2>
         <p>At <strong>SweepXpress</strong>, we value your privacy. This Privacy Policy explains how we collect, use, and protect your personal information when you access our website or purchase our products.</p>
 
@@ -46,7 +45,7 @@ require_once __DIR__ . '/includes/header.php';
         <h2>5. Data Security</h2>
         <p>We implement reasonable security measures to protect your information. However, no system is 100% secure, and we cannot guarantee absolute protection.</p>
 
-        <h2>6. Cookies & Tracking</h2>
+        <h2>6. Cookies &amp; Tracking</h2>
         <p>Our website may use cookies to enhance your browsing experience. You can disable cookies in your browser, but some features may not function properly.</p>
 
         <h2>7. Your Rights</h2>
@@ -61,16 +60,13 @@ require_once __DIR__ . '/includes/header.php';
         <p>Our services are not intended for individuals under 18 years old. We do not knowingly collect information from minors.</p>
 
         <h2>9. Changes to this Privacy Policy</h2>
-        <p>We may update this Privacy Policy from time to time. Updates will be posted on this page with the new “Last Updated” date.</p>
+        <p>We may update this Privacy Policy from time to time. Updates will be posted on this page with the new “Last updated” date.</p>
 
         <h2>10. Contact Us</h2>
         <p>If you have questions or concerns, contact us at:</p>
         <p>Email: <a href="mailto:sweepxpress@gmail.com">sweepxpress@gmail.com</a><br>
            Address: Quezon City, Philippines</p>
-    </div>
-</body>
-</html>
-<?php
-require_once __DIR__ . '/includes/footer.php';
-?>
+    </article>
+</div>
 
+<?php require_once __DIR__ . '/includes/footer.php'; ?>

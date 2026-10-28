@@ -45,10 +45,7 @@ require_once __DIR__ . '/../includes/header.php';
             <p class="sx-page-subtitle">Lahat ng <code>sx-</code> components at design tokens sa iisang lugar.</p>
         </div>
         <div class="sg-row">
-            <!-- Dark mode preview: styleguide lang, hindi tinatandaan (site-wide sa Phase 9) -->
-            <button type="button" class="sx-btn sx-btn-outline" id="sgThemeToggle" aria-pressed="false">
-                <i class="fa-solid fa-moon"></i> <span>Dark mode</span>
-            </button>
+            <!-- Dark mode: gamitin ang buwan/araw sa navbar (site-wide na mula 9h) -->
             <a href="dashboard.php" class="sx-btn sx-btn-outline"><i class="fa-solid fa-arrow-left"></i> Dashboard</a>
         </div>
     </header>
@@ -246,17 +243,5 @@ require_once __DIR__ . '/../includes/header.php';
     </section>
 
 </main>
-
-<script>
-// Dark mode preview — styleguide lang; hindi tinatandaan sa ibang page
-document.getElementById('sgThemeToggle').addEventListener('click', function () {
-    const root = document.documentElement;
-    const dark = root.dataset.theme !== 'dark';
-    if (dark) root.dataset.theme = 'dark'; else delete root.dataset.theme;
-    this.setAttribute('aria-pressed', dark);
-    this.querySelector('i').className = dark ? 'fa-solid fa-sun' : 'fa-solid fa-moon';
-    this.querySelector('span').textContent = dark ? 'Light mode' : 'Dark mode';
-});
-</script>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
