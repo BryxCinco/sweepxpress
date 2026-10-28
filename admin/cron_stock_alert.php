@@ -29,22 +29,22 @@ $is_silent = isset($silent_mode) && $silent_mode === true;
 // 3. SETTINGS & CREDENTIALS
 // Mail credentials galing sa includes/email_config.php (.env) — nilo-load sa SEND EMAIL step sa ibaba.
 
-$threshold = 10; 
+// Threshold: products.reorder_point ng bawat produkto (Phase 7c; dati 10 para sa lahat)
 
 // ==============================
 // 🧠 LOGIC & SENDING
 // ==============================
 try {
     // 1. Check Stock
-    $sql = "SELECT p.name, p.sku, IFNULL(SUM(i.quantity),0) as real_stock 
+    $sql = "SELECT p.name, p.sku, p.reorder_point, IFNULL(SUM(i.quantity),0) as real_stock
             FROM products p 
             LEFT JOIN inventory i ON i.product_id = p.id 
-            GROUP BY p.id 
-            HAVING real_stock <= :threshold 
+            GROUP BY p.id, p.reorder_point
+            HAVING real_stock <= p.reorder_point
             ORDER BY real_stock ASC";
             
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([':threshold' => $threshold]);
+    $stmt->execute();
     $lowStockItems = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     // 2. Prepare Email Content
@@ -70,8 +70,10 @@ try {
         foreach ($lowStockItems as $item) {
             $stock = $item['real_stock'];
             $status = ($stock == 0) ? "<span class='badge out'>Out of Stock</span>" : "<span class='badge crit'>Critical</span>";
+            $itemName = htmlspecialchars((string)$item['name'], ENT_QUOTES, 'UTF-8');
+            $itemSku  = htmlspecialchars((string)$item['sku'], ENT_QUOTES, 'UTF-8');
             $htmlContent .= "<tr>
-                <td>{$item['name']} <br><small style='color:#999'>{$item['sku']}</small></td>
+                <td>{$itemName} <br><small style='color:#999'>{$itemSku} · reorder at {$item['reorder_point']}</small></td>
                 <td><strong>{$stock}</strong></td>
                 <td>{$status}</td>
             </tr>";

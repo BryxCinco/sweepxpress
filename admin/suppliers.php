@@ -134,7 +134,7 @@ a.sp-tile:hover { transform: translateY(-2px); box-shadow: var(--sx-shadow-md); 
             <strong><?= (int)$sum['late'] ?></strong>
             <small>Past expected date</small>
         </div>
-        <a href="products.php" class="sx-card sp-tile wide<?= $sum['unassigned'] ? ' warn' : '' ?>">
+        <a href="products.php?supplier=none" class="sx-card sp-tile wide<?= $sum['unassigned'] ? ' warn' : '' ?>">
             <span>Products without a supplier</span>
             <strong><?= (int)$sum['unassigned'] ?></strong>
             <small>Set one on the product page</small>

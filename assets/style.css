@@ -1335,6 +1335,7 @@ a:hover > .sx-logo-mark { transform: rotate(0); }
 .pf-main, .pf-side { display: grid; gap: var(--sx-space-5); min-width: 0; }
 .pf-title { margin: 0 0 var(--sx-space-4); font-size: var(--sx-text-lg); font-weight: var(--sx-weight-extrabold); color: var(--sx-dark); }
 .pf-grid { display: grid; gap: 0 var(--sx-space-4); }
+.pf-subtitle { margin: var(--sx-space-4) 0 var(--sx-space-3); padding-top: var(--sx-space-4); border-top: 1px solid var(--sx-border-light); font-size: var(--sx-text-base); font-weight: var(--sx-weight-bold); color: var(--sx-dark); }
 .pf-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sx-space-2); margin-top: var(--sx-space-3); }
 .pf-file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .pf-drop {

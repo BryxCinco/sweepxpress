@@ -8,7 +8,6 @@ if (!is_admin()) {
 }
 
 $currentAdmin = $_SESSION['user'] ?? [];
-$lowStock     = 10; // pareho sa admin/inventory.php at product card
 
 // Mga default para hindi mag-warning ang page kapag pumalya ang DB
 $kpi = array_fill_keys(['revenue', 'orders', 'open', 'aov', 'cancelRate', 'invValue', 'units', 'low', 'out'], 0);
@@ -39,13 +38,13 @@ try {
         SELECT
             COALESCE(SUM(q.qty * q.price), 0) AS value,
             COALESCE(SUM(q.qty), 0) AS units,
-            SUM(q.qty > 0 AND q.qty <= {$lowStock}) AS low,
+            SUM(q.qty > 0 AND q.qty <= q.reorder_point) AS low,
             SUM(q.qty = 0) AS out_of_stock
         FROM (
-            SELECT p.price, COALESCE(SUM(i.quantity), 0) AS qty
+            SELECT p.price, p.reorder_point, COALESCE(SUM(i.quantity), 0) AS qty
             FROM products p
             LEFT JOIN inventory i ON i.product_id = p.id
-            GROUP BY p.id, p.price
+            GROUP BY p.id, p.price, p.reorder_point
         ) q
     ")->fetch(PDO::FETCH_ASSOC);
     $kpi['invValue'] = (float)$i['value'];
@@ -110,11 +109,11 @@ try {
 
     // ---- Pinakamababang stock
     $lowStockList = $pdo->query("
-        SELECT p.id, p.name, p.category, COALESCE(SUM(i.quantity), 0) AS qty
+        SELECT p.id, p.name, p.category, p.reorder_point, COALESCE(SUM(i.quantity), 0) AS qty
         FROM products p
         LEFT JOIN inventory i ON i.product_id = p.id
-        GROUP BY p.id, p.name, p.category
-        HAVING qty <= {$lowStock}
+        GROUP BY p.id, p.name, p.category, p.reorder_point
+        HAVING qty <= p.reorder_point
         ORDER BY qty ASC, p.name
         LIMIT 6
     ")->fetchAll(PDO::FETCH_ASSOC);
@@ -328,7 +327,7 @@ a.db-kpi:hover { transform: translateY(-2px); box-shadow: var(--sx-shadow-md); }
         <a href="/sweepxpress/admin/inventory.php?filter=low" class="sx-card db-kpi">
             <div class="db-kpi-top"><span class="db-kpi-label">Low stock</span><span class="db-kpi-icon warn"><i class="fa-solid fa-triangle-exclamation"></i></span></div>
             <div class="db-kpi-value"><?= number_format($kpi['low']) ?></div>
-            <div class="db-kpi-meta"><?= $lowStock ?> units or fewer</div>
+            <div class="db-kpi-meta">At or below reorder point</div>
         </a>
         <a href="/sweepxpress/admin/inventory.php?filter=out" class="sx-card db-kpi">
             <div class="db-kpi-top"><span class="db-kpi-label">Out of stock</span><span class="db-kpi-icon danger"><i class="fa-solid fa-circle-xmark"></i></span></div>
@@ -381,7 +380,7 @@ a.db-kpi:hover { transform: translateY(-2px); box-shadow: var(--sx-shadow-md); }
                     <ul class="db-list">
                         <?php foreach ($lowStockList as $p): ?>
                             <li>
-                                <span class="name"><?= h($p['name']) ?><small><?= h($p['category'] ?: 'Uncategorized') ?></small></span>
+                                <span class="name"><?= h($p['name']) ?><small>Reorder at <?= (int)$p['reorder_point'] ?> · <?= h($p['category'] ?: 'Uncategorized') ?></small></span>
                                 <span class="db-qty <?= (int)$p['qty'] === 0 ? 'out' : 'low' ?>"><?= (int)$p['qty'] === 0 ? 'Out' : (int)$p['qty'] . ' left' ?></span>
                             </li>
                         <?php endforeach; ?>

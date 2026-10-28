@@ -10,8 +10,6 @@ if (!is_admin()) { header("Location: /sweepxpress/login.php"); exit; }
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../includes/admin_products.php';
 
-$lowStock = 10; // pareho sa dashboard, products at product card
-
 // =================================================================================
 // 1. CSV EXPORT
 // =================================================================================
@@ -22,14 +20,23 @@ if (isset($_GET['action']) && $_GET['action'] === 'export') {
     $output = fopen('php://output', 'w');
     fputs($output, "sep=,\n");
     fputs($output, "\xEF\xBB\xBF");
-    fputcsv($output, ['ID', 'Product Name', 'SKU', 'Unit Price', 'Current Stock', 'Capital Tied', 'Status']);
+    fputcsv($output, ['ID', 'Product Name', 'SKU', 'Supplier', 'Unit Price', 'Cost Price', 'Current Stock', 'Reorder Point', 'Value at Price', 'Value at Cost', 'Status']);
     try {
-        $stmt = $pdo->query("SELECT p.id, p.name, p.sku, p.price, IFNULL(SUM(i.quantity),0) as real_stock FROM products p LEFT JOIN inventory i ON i.product_id = p.id GROUP BY p.id ORDER BY p.name ASC");
+        $stmt = $pdo->query("
+            SELECT p.id, p.name, p.sku, s.name AS supplier, p.price, p.cost_price, p.reorder_point, IFNULL(SUM(i.quantity), 0) AS real_stock
+            FROM products p
+            LEFT JOIN inventory i ON i.product_id = p.id
+            LEFT JOIN suppliers s ON s.id = p.supplier_id
+            GROUP BY p.id ORDER BY p.name ASC
+        ");
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $stock = (int)$row['real_stock'];
             $price = (float)$row['price'];
-            $status = ($stock == 0) ? 'Out of Stock' : (($stock <= $lowStock) ? 'Low Stock' : 'In Stock');
-            fputcsv($output, [$row['id'], $row['name'], $row['sku'], number_format($price, 2, '.', ''), $stock, number_format($stock * $price, 2, '.', ''), $status]);
+            $cost  = $row['cost_price'] === null ? null : (float)$row['cost_price'];
+            $status = ($stock == 0) ? 'Out of Stock' : (($stock <= (int)$row['reorder_point']) ? 'Low Stock' : 'In Stock');
+            fputcsv($output, [$row['id'], $row['name'], $row['sku'], $row['supplier'] ?? '', number_format($price, 2, '.', ''),
+                              $cost === null ? '' : number_format($cost, 2, '.', ''), $stock, (int)$row['reorder_point'],
+                              number_format($stock * $price, 2, '.', ''), $cost === null ? '' : number_format($stock * $cost, 2, '.', ''), $status]);
         }
     } catch (Exception $e) {}
     fclose($output);
@@ -44,13 +51,13 @@ $valData = $pdo->query("
         COUNT(*) AS products,
         COALESCE(SUM(s.qty * s.price), 0) AS total_value,
         COALESCE(SUM(s.qty), 0) AS units,
-        SUM(s.qty > 0 AND s.qty <= {$lowStock}) AS low_stock_count,
+        SUM(s.qty > 0 AND s.qty <= s.reorder_point) AS low_stock_count,
         SUM(s.qty = 0) AS out_of_stock_count
     FROM (
-        SELECT p.price, IFNULL(SUM(i.quantity), 0) AS qty
+        SELECT p.price, p.reorder_point, IFNULL(SUM(i.quantity), 0) AS qty
         FROM products p
         LEFT JOIN inventory i ON i.product_id = p.id
-        GROUP BY p.id, p.price
+        GROUP BY p.id, p.price, p.reorder_point
     ) s
 ")->fetch(PDO::FETCH_ASSOC);
 
@@ -69,19 +76,19 @@ if ($search !== '') {
     $params = ["%{$search}%", "%{$search}%"];
 }
 $havingClause = match ($filter) {
-    'low'   => "HAVING real_stock > 0 AND real_stock <= {$lowStock}",
+    'low'   => 'HAVING real_stock > 0 AND real_stock <= reorder_point',
     'out'   => 'HAVING real_stock = 0',
     default => '',
 };
 
 $base = "
-    SELECT p.id, p.name, COALESCE(p.sku, '') AS sku, COALESCE(p.price, 0) AS price, p.image_path,
+    SELECT p.id, p.name, COALESCE(p.sku, '') AS sku, COALESCE(p.price, 0) AS price, p.image_path, p.reorder_point,
            IFNULL(SUM(i.quantity), 0) AS real_stock,
            (SELECT MAX(created_at) FROM stock_movements WHERE product_id = p.id) AS last_move
     FROM products p
     LEFT JOIN inventory i ON i.product_id = p.id
     {$whereSql}
-    GROUP BY p.id, p.name, p.sku, p.price, p.image_path
+    GROUP BY p.id, p.name, p.sku, p.price, p.image_path, p.reorder_point
     {$havingClause}
 ";
 
@@ -93,7 +100,7 @@ $page = min($page, $totalPages);
 $offset = ($page - 1) * $limit;
 
 // Low/out muna kapag "All" para unang makita ang kailangang i-restock
-$order = $filter === 'all' ? "(real_stock > {$lowStock}), real_stock ASC, name" : 'real_stock ASC, name';
+$order = $filter === 'all' ? '(real_stock > reorder_point), real_stock ASC, name' : 'real_stock ASC, name';
 $stmt = $pdo->prepare("SELECT * FROM ({$base}) t ORDER BY {$order} LIMIT {$limit} OFFSET {$offset}");
 $stmt->execute($params);
 $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -197,7 +204,7 @@ a.iv-kpi:hover { box-shadow: var(--sx-shadow-md); }
     <div class="iv-kpis">
         <div class="sx-card iv-kpi"><span>Stock value</span><strong>₱<?= number_format((float)$valData['total_value'], 2) ?></strong></div>
         <div class="sx-card iv-kpi"><span>Units on hand</span><strong><?= number_format((int)$valData['units']) ?></strong></div>
-        <a href="<?= h($url(['filter' => 'low', 'page' => null])) ?>" class="sx-card iv-kpi warn"><span>Low stock (≤ <?= $lowStock ?>)</span><strong><?= (int)$valData['low_stock_count'] ?></strong></a>
+        <a href="<?= h($url(['filter' => 'low', 'page' => null])) ?>" class="sx-card iv-kpi warn"><span>Low stock</span><strong><?= (int)$valData['low_stock_count'] ?></strong></a>
         <a href="<?= h($url(['filter' => 'out', 'page' => null])) ?>" class="sx-card iv-kpi danger"><span>Out of stock</span><strong><?= (int)$valData['out_of_stock_count'] ?></strong></a>
     </div>
 
@@ -239,7 +246,7 @@ a.iv-kpi:hover { box-shadow: var(--sx-shadow-md); }
                     <tbody>
                         <?php foreach ($products as $p):
                             $stock = (int)$p['real_stock'];
-                            $cls = $stock === 0 ? 'out' : ($stock <= $lowStock ? 'low' : 'in');
+                            $cls = $stock === 0 ? 'out' : ($stock <= (int)$p['reorder_point'] ? 'low' : 'in');
                             $historyUrl = 'product_history.php?product_id=' . (int)$p['id'];
                         ?>
                             <tr data-href="<?= $historyUrl ?>">

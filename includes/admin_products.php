@@ -76,14 +76,18 @@ if (!function_exists('sx_product_categories')) {
     }
 
     // Basahin at i-validate ang details form (add at edit) → [values, errors]
-    function sx_product_input(): array
+    function sx_product_input(PDO $pdo): array
     {
         $v = [
-            'name'        => trim($_POST['name'] ?? ''),
-            'sku'         => strtoupper(trim($_POST['sku'] ?? '')),
-            'category'    => trim($_POST['category'] ?? ''),
-            'price'       => trim($_POST['price'] ?? ''),
-            'description' => trim($_POST['description'] ?? ''),
+            'name'          => trim($_POST['name'] ?? ''),
+            'sku'           => strtoupper(trim($_POST['sku'] ?? '')),
+            'category'      => trim($_POST['category'] ?? ''),
+            'price'         => trim($_POST['price'] ?? ''),
+            'description'   => trim($_POST['description'] ?? ''),
+            'supplier_id'   => trim($_POST['supplier_id'] ?? ''),
+            'cost_price'    => trim($_POST['cost_price'] ?? ''),
+            'reorder_point' => trim($_POST['reorder_point'] ?? '10'),
+            'reorder_qty'   => trim($_POST['reorder_qty'] ?? ''),
         ];
         $errors = [];
         if ($v['name'] === '') $errors[] = 'Name is required.';
@@ -92,11 +96,44 @@ if (!function_exists('sx_product_categories')) {
         if ($v['category'] === '') $errors[] = 'Category is required.';
         if (!is_numeric($v['price']) || (float)$v['price'] < 0) $errors[] = 'Price must be 0 or more.';
         if ($v['description'] === '') $errors[] = 'Description is required.';
+
+        // Supply (Phase 7c)
+        if ($v['supplier_id'] !== '') {
+            $s = $pdo->prepare("SELECT 1 FROM suppliers WHERE id = ?");
+            $s->execute([(int)$v['supplier_id']]);
+            if (!ctype_digit($v['supplier_id']) || !$s->fetchColumn()) $errors[] = 'Choose a supplier from the list.';
+        }
+        if ($v['cost_price'] !== '' && (!is_numeric($v['cost_price']) || (float)$v['cost_price'] < 0 || (float)$v['cost_price'] > 10000000)) {
+            $errors[] = 'Cost price must be 0 or more.';
+        }
+        if (!ctype_digit($v['reorder_point']) || (int)$v['reorder_point'] > 100000) $errors[] = 'Reorder point must be a whole number from 0.';
+        if ($v['reorder_qty'] !== '' && (!ctype_digit($v['reorder_qty']) || (int)$v['reorder_qty'] < 1 || (int)$v['reorder_qty'] > 100000)) {
+            $errors[] = 'Reorder quantity must be a whole number from 1.';
+        }
         return [$v, $errors];
     }
 
+    // supplier_id, cost_price, reorder_point, reorder_qty para sa INSERT/UPDATE (blangko → NULL)
+    function sx_product_supply_params(array $v): array
+    {
+        return [
+            $v['supplier_id'] === '' ? null : (int)$v['supplier_id'],
+            $v['cost_price'] === '' ? null : round((float)$v['cost_price'], 2),
+            (int)$v['reorder_point'],
+            $v['reorder_qty'] === '' ? null : (int)$v['reorder_qty'],
+        ];
+    }
+
+    // Mga supplier para sa dropdown: aktibo, at ang kasalukuyan kahit inactive na
+    function sx_product_suppliers(PDO $pdo, $currentId = null): array
+    {
+        $s = $pdo->prepare("SELECT id, name, is_active FROM suppliers WHERE is_active = 1 OR id = ? ORDER BY name");
+        $s->execute([(int)$currentId]);
+        return $s->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     // Mga field ng product details (iisa para sa add at edit)
-    function sx_product_fields(array $v, array $categories): void
+    function sx_product_fields(array $v, array $categories, array $suppliers = []): void
     {
         $e = fn($s) => htmlspecialchars((string)($s ?? ''), ENT_QUOTES, 'UTF-8');
         ?>
@@ -126,6 +163,54 @@ if (!function_exists('sx_product_categories')) {
                 <textarea id="pf-desc" name="description" class="sx-textarea" rows="4" required><?= $e($v['description'] ?? '') ?></textarea>
             </div>
         </div>
+
+        <h3 class="pf-subtitle">Supply &amp; reorder</h3>
+        <div class="pf-grid">
+            <div class="sx-field pf-full">
+                <label class="sx-label" for="pf-supplier">Supplier <span class="sx-hint">(optional)</span></label>
+                <select id="pf-supplier" name="supplier_id" class="sx-select">
+                    <option value="">No supplier</option>
+                    <?php foreach ($suppliers as $s): ?>
+                        <option value="<?= (int)$s['id'] ?>" <?= (string)($v['supplier_id'] ?? '') === (string)$s['id'] ? 'selected' : '' ?>>
+                            <?= $e($s['name']) ?><?= $s['is_active'] ? '' : ' (inactive)' ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+                <?php if (!$suppliers): ?><span class="sx-hint">No suppliers yet — <a href="/sweepxpress/admin/supplier.php">add one</a>.</span><?php endif; ?>
+            </div>
+            <div class="sx-field">
+                <label class="sx-label" for="pf-cost">Cost price (₱) <span class="sx-hint">(optional)</span></label>
+                <input type="number" id="pf-cost" name="cost_price" class="sx-input" min="0" step="0.01" inputmode="decimal" value="<?= $e($v['cost_price'] ?? '') ?>">
+                <span class="sx-hint" id="pf-margin" aria-live="polite"></span>
+            </div>
+            <div class="sx-field">
+                <label class="sx-label" for="pf-reorder">Reorder point</label>
+                <input type="number" id="pf-reorder" name="reorder_point" class="sx-input" required min="0" step="1" value="<?= $e($v['reorder_point'] ?? '10') ?>">
+                <span class="sx-hint">Low stock at or below this many units.</span>
+            </div>
+            <div class="sx-field">
+                <label class="sx-label" for="pf-reorder-qty">Reorder quantity <span class="sx-hint">(optional)</span></label>
+                <input type="number" id="pf-reorder-qty" name="reorder_qty" class="sx-input" min="1" step="1" value="<?= $e($v['reorder_qty'] ?? '') ?>">
+                <span class="sx-hint">Usual amount to order from the supplier.</span>
+            </div>
+        </div>
+        <script>
+        // Margin habang nagta-type (price − cost)
+        (function () {
+            const price = document.getElementById('pf-price'), cost = document.getElementById('pf-cost'), out = document.getElementById('pf-margin');
+            function update() {
+                const p = parseFloat(price.value), c = parseFloat(cost.value);
+                if (isNaN(p) || isNaN(c) || cost.value === '') { out.textContent = ''; return; }
+                const m = p - c, pct = p > 0 ? (m / p * 100) : 0;
+                out.textContent = m < 0 ? 'Cost is higher than the price (loss of ₱' + Math.abs(m).toFixed(2) + ' per unit).'
+                                        : 'Margin ₱' + m.toFixed(2) + ' per unit (' + pct.toFixed(1) + '%).';
+                out.style.color = m < 0 ? 'var(--sx-danger)' : '';
+            }
+            price.addEventListener('input', update);
+            cost.addEventListener('input', update);
+            update();
+        })();
+        </script>
         <?php
     }
 

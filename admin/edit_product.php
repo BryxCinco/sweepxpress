@@ -32,7 +32,7 @@ if ($product && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!sx_csrf_ok()) {
         $errors[] = 'Your session expired. Please try again.';
     } elseif ($action === 'update_details') {
-        [$values, $errors] = sx_product_input();
+        [$values, $errors] = sx_product_input($pdo);
         if (!$errors) {
             if ($values['sku'] === '') {
                 $values['sku'] = sx_generate_sku($pdo, $values['name']) ?? '';
@@ -44,8 +44,12 @@ if ($product && $_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if (!$errors) {
             try {
-                $pdo->prepare("UPDATE products SET name = ?, sku = ?, description = ?, price = ?, category = ? WHERE id = ?")
-                    ->execute([$values['name'], $values['sku'], $values['description'], (float)$values['price'], $values['category'], $id]);
+                $pdo->prepare("
+                    UPDATE products SET name = ?, sku = ?, description = ?, price = ?, category = ?,
+                           supplier_id = ?, cost_price = ?, reorder_point = ?, reorder_qty = ?
+                    WHERE id = ?
+                ")->execute([$values['name'], $values['sku'], $values['description'], (float)$values['price'], $values['category'],
+                             ...sx_product_supply_params($values), $id]);
                 $done = 'Details saved.';
             } catch (PDOException $e) {
                 error_log("Product update error: " . $e->getMessage());
@@ -120,8 +124,10 @@ if ($product) {
     $stats = $stats->fetch(PDO::FETCH_ASSOC);
 }
 
-$values     = $values ?? ($product ? array_intersect_key($product, array_flip(['name', 'sku', 'category', 'price', 'description'])) : []);
+$values     = $values ?? ($product ? array_intersect_key($product, array_flip(['name', 'sku', 'category', 'price', 'description',
+                                                                         'supplier_id', 'cost_price', 'reorder_point', 'reorder_qty'])) : []);
 $categories = sx_product_categories($pdo);
+$suppliers  = $product ? sx_product_suppliers($pdo, $product['supplier_id']) : [];
 $flash      = sx_flash();
 $csrf       = sx_csrf_token();
 $placeholder = '/sweepxpress/assets/placeholder.jpg';
@@ -144,7 +150,7 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 <?php else:
     $stock = (int)$stats['stock'];
-    $stockCls = $stock === 0 ? 'out' : ($stock <= 10 ? 'low' : 'in');
+    $stockCls = $stock === 0 ? 'out' : ($stock <= (int)$product['reorder_point'] ? 'low' : 'in');
 ?>
     <div class="pf-head">
         <div>
@@ -175,7 +181,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <input type="hidden" name="action" value="update_details">
                 <input type="hidden" name="id" value="<?= (int)$id ?>">
                 <h2 class="pf-title">Details</h2>
-                <?php sx_product_fields($values, $categories); ?>
+                <?php sx_product_fields($values, $categories, $suppliers); ?>
                 <div class="pf-actions" style="justify-content: flex-end">
                     <button type="submit" class="sx-btn sx-btn-primary">Save details</button>
                 </div>
@@ -233,7 +239,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <h2 class="pf-title">Stock</h2>
                 <div class="pf-stock">
                     <span class="ap-stock <?= $stockCls ?>"><?= $stock === 0 ? 'Out of stock' : number_format($stock) . ' on hand' ?></span>
-                    <span class="sx-hint"><?= number_format((int)$stats['sold']) ?> sold<?= $stats['last_move'] ? ' · last movement ' . date('M j, Y', strtotime($stats['last_move'])) : '' ?></span>
+                    <span class="sx-hint">Reorder at <?= (int)$product['reorder_point'] ?> · <?= number_format((int)$stats['sold']) ?> sold<?= $stats['last_move'] ? ' · last movement ' . date('M j, Y', strtotime($stats['last_move'])) : '' ?></span>
                 </div>
                 <div class="pf-stock-links">
                     <a href="/sweepxpress/admin/stock_in.php" class="sx-btn sx-btn-outline sx-btn-sm"><i class="fa-solid fa-truck-ramp-box"></i> Stock in</a>

@@ -10,8 +10,6 @@ if (!is_admin()) {
     exit();
 }
 
-$lowStock = 10; // pareho sa inventory.php
-
 // ---------------- Delete (POST + CSRF; dati GET link) ----------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete') {
     $id = (int)($_POST['id'] ?? 0);
@@ -53,6 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
 $search   = trim($_GET['q'] ?? '');
 $category = trim($_GET['category'] ?? '');
 $stockF   = in_array($_GET['stock'] ?? '', ['low', 'out'], true) ? $_GET['stock'] : '';
+$noSupp   = ($_GET['supplier'] ?? '') === 'none';
 $limit    = 15;
 $page     = max(1, (int)($_GET['page'] ?? 1));
 
@@ -67,14 +66,15 @@ if ($category !== '') {
     $where[]  = 'p.category = ?';
     $params[] = $category;
 }
+if ($noSupp) $where[] = 'p.supplier_id IS NULL';
 $having = match ($stockF) {
-    'low'   => "HAVING stock > 0 AND stock <= {$lowStock}",
+    'low'   => 'HAVING stock > 0 AND stock <= reorder_point',
     'out'   => 'HAVING stock = 0',
     default => '',
 };
 
 $base = "
-    SELECT p.id, p.sku, p.name, p.category, p.price, p.image_path,
+    SELECT p.id, p.sku, p.name, p.category, p.price, p.image_path, p.reorder_point,
            COALESCE((SELECT SUM(quantity) FROM inventory WHERE product_id = p.id), 0) AS stock,
            COALESCE((SELECT SUM(oi.quantity) FROM order_items oi JOIN orders o ON o.id = oi.order_id
                      WHERE oi.product_id = p.id AND o.status <> 'cancelled'), 0) AS sold,
@@ -102,8 +102,8 @@ $csrf         = sx_csrf_token();
 $placeholder  = '/sweepxpress/assets/placeholder.jpg';
 
 // Link na pinapanatili ang filters
-$url = function (array $changes = []) use ($search, $category, $stockF, $page) {
-    $q = array_filter(array_merge(['q' => $search, 'category' => $category, 'stock' => $stockF, 'page' => $page > 1 ? $page : null], $changes),
+$url = function (array $changes = []) use ($search, $category, $stockF, $noSupp, $page) {
+    $q = array_filter(array_merge(['q' => $search, 'category' => $category, 'stock' => $stockF, 'supplier' => $noSupp ? 'none' : null, 'page' => $page > 1 ? $page : null], $changes),
         fn($v) => $v !== null && $v !== '');
     return 'products.php' . ($q ? '?' . http_build_query($q) : '');
 };
@@ -169,6 +169,7 @@ require_once __DIR__ . '/../includes/header.php';
         <form class="ap-search" method="get" role="search">
             <?php if ($category !== ''): ?><input type="hidden" name="category" value="<?= h($category) ?>"><?php endif; ?>
             <?php if ($stockF !== ''): ?><input type="hidden" name="stock" value="<?= h($stockF) ?>"><?php endif; ?>
+            <?php if ($noSupp): ?><input type="hidden" name="supplier" value="none"><?php endif; ?>
             <input type="search" name="q" class="sx-input" placeholder="Search name or SKU…" value="<?= h($search) ?>" aria-label="Search products">
             <button type="submit" class="sx-btn sx-btn-dark sx-btn-sm"><i class="fa-solid fa-magnifying-glass"></i></button>
         </form>
@@ -180,6 +181,7 @@ require_once __DIR__ . '/../includes/header.php';
             <span class="sep" aria-hidden="true"></span>
             <a href="<?= h($url(['stock' => $stockF === 'low' ? null : 'low', 'page' => null])) ?>" class="sx-chip<?= $stockF === 'low' ? ' active' : '' ?>">Low stock</a>
             <a href="<?= h($url(['stock' => $stockF === 'out' ? null : 'out', 'page' => null])) ?>" class="sx-chip<?= $stockF === 'out' ? ' active' : '' ?>">Out of stock</a>
+            <a href="<?= h($url(['supplier' => $noSupp ? null : 'none', 'page' => null])) ?>" class="sx-chip<?= $noSupp ? ' active' : '' ?>">No supplier</a>
         </div>
     </div>
 
@@ -200,7 +202,7 @@ require_once __DIR__ . '/../includes/header.php';
                     <tbody>
                         <?php foreach ($items as $p):
                             $stock = (int)$p['stock'];
-                            $cls = $stock === 0 ? 'out' : ($stock <= $lowStock ? 'low' : 'in');
+                            $cls = $stock === 0 ? 'out' : ($stock <= (int)$p['reorder_point'] ? 'low' : 'in');
                         ?>
                             <tr>
                                 <td>

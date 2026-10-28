@@ -9,12 +9,12 @@ $product_id = (int)($_GET['product_id'] ?? 0);
 
 // Product + kasalukuyang stock (redirect bago ang header; dati pagkatapos kaya hindi gumagana)
 $productStmt = $pdo->prepare("
-    SELECT p.id, p.name, COALESCE(p.sku, '') AS sku, COALESCE(p.image_path, '') AS image_path, p.price,
+    SELECT p.id, p.name, COALESCE(p.sku, '') AS sku, COALESCE(p.image_path, '') AS image_path, p.price, p.reorder_point,
            IFNULL(SUM(i.quantity), 0) AS current_stock
     FROM products p
     LEFT JOIN inventory i ON i.product_id = p.id
     WHERE p.id = ?
-    GROUP BY p.id, p.name, p.sku, p.image_path, p.price
+    GROUP BY p.id, p.name, p.sku, p.image_path, p.price, p.reorder_point
 ");
 $productStmt->execute([$product_id]);
 $product = $productStmt->fetch(PDO::FETCH_ASSOC);
@@ -51,7 +51,7 @@ $chartLabels = array_map(fn($m) => date('M j', strtotime($m['created_at'])), $hi
 $chartData   = array_map(fn($m) => $m['stock_after'], $history);
 
 $history = array_reverse($history); // pinakabago muna sa table
-$lowStock = 10;
+$lowStock = (int)$product['reorder_point'];
 $stockCls = $current_stock === 0 ? 'out' : ($current_stock <= $lowStock ? 'low' : 'in');
 $placeholder = '/sweepxpress/assets/placeholder.jpg';
 

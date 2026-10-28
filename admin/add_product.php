@@ -5,12 +5,13 @@ require_once __DIR__ . '/admin_auth.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/admin_products.php';
 
-$values = ['name' => '', 'sku' => '', 'category' => '', 'price' => '', 'description' => ''];
+$values = ['name' => '', 'sku' => '', 'category' => '', 'price' => '', 'description' => '',
+           'supplier_id' => '', 'cost_price' => '', 'reorder_point' => '10', 'reorder_qty' => ''];
 $errors = [];
 
 // Processing bago ang header (dati: pagkatapos, kaya hindi gumagana ang redirect)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    [$values, $errors] = sx_product_input();
+    [$values, $errors] = sx_product_input($pdo);
     if (!sx_csrf_ok()) $errors[] = 'Your session expired. Please try again.';
 
     if (!$errors) {
@@ -32,8 +33,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!$errors) {
         try {
-            $pdo->prepare("INSERT INTO products (sku, name, description, price, category, image_path, stock) VALUES (?, ?, ?, ?, ?, ?, 0)")
-                ->execute([$values['sku'], $values['name'], $values['description'], (float)$values['price'], $values['category'], $image['path']]);
+            $pdo->prepare("
+                INSERT INTO products (sku, name, description, price, category, image_path, stock, supplier_id, cost_price, reorder_point, reorder_qty)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+            ")->execute([$values['sku'], $values['name'], $values['description'], (float)$values['price'], $values['category'], $image['path'],
+                         ...sx_product_supply_params($values)]);
             $newId = (int)$pdo->lastInsertId();
             sx_flash(['success', "“{$values['name']}” was added. Add stock so customers can order it."]);
             header("Location: edit_product.php?id={$newId}");
@@ -47,6 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $categories = sx_product_categories($pdo);
+$suppliers  = sx_product_suppliers($pdo);
 $csrf = sx_csrf_token();
 
 require_once __DIR__ . '/../includes/header.php';
@@ -73,7 +78,7 @@ require_once __DIR__ . '/../includes/header.php';
         <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
         <section class="sx-card">
             <h2 class="pf-title">Details</h2>
-            <?php sx_product_fields($values, $categories); ?>
+            <?php sx_product_fields($values, $categories, $suppliers); ?>
         </section>
 
         <aside class="pf-side">
