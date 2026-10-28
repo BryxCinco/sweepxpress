@@ -27,6 +27,7 @@ if (is_admin()) {
         ],
         'Supply chain' => [
             ['admin/reorder.php', 'fa-cart-flatbed', 'Reorder', ['admin/reorder.php']],
+            ['admin/reorder_points.php', 'fa-wand-magic-sparkles', 'Reorder points', ['admin/reorder_points.php']],
             ['admin/purchase_orders.php', 'fa-file-invoice', 'Purchase orders', ['admin/purchase_order*']],
             ['admin/suppliers.php', 'fa-truck-field', 'Suppliers', ['admin/suppliers.php', 'admin/supplier.php']],
         ],

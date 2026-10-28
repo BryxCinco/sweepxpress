@@ -154,6 +154,7 @@ require_once __DIR__ . '/../includes/header.php';
         </div>
         <div style="display: flex; align-items: center; gap: var(--sx-space-3); flex-wrap: wrap">
             <?= sx_forecast_picker($window) ?>
+            <a href="reorder_points.php" class="sx-btn sx-btn-outline sx-btn-sm"><i class="fa-solid fa-wand-magic-sparkles"></i> Reorder points</a>
             <a href="purchase_orders.php" class="sx-btn sx-btn-outline sx-btn-sm"><i class="fa-solid fa-file-invoice"></i> Purchase orders</a>
         </div>
     </div>

@@ -90,4 +90,128 @@ if (!function_exists('sx_sales_velocity')) {
         $tone = $days <= $leadTime ? 'low' : 'ok';   // mauubos bago pa dumating ang bagong order
         return ['~' . $days . ' day' . ($days === 1 ? '' : 's') . ' left', $tone];
     }
+
+    // ---------------------------------------------------------------------------------
+    // Smart reorder points (Phase 8c). Klasikong inventory math, hindi black box:
+    //   reorder point = benta/araw × lead time ng supplier + safety stock
+    //   safety stock  = 1.65 × (pagbabago ng benta kada araw) × √lead time   (≈95% na hindi mauubusan)
+    //   reorder qty   = benta/araw × 30 (isang buwang suplay)
+    // Ang bulk na araw (hal. isang order na 1,000 pcs) ay nilalagyan ng cap para hindi nito sirain ang average.
+    // ---------------------------------------------------------------------------------
+    define('SX_RP_Z', 1.65);            // service level ≈ 95%
+    define('SX_RP_CYCLE_DAYS', 30);     // ilang araw na suplay ang bawat order
+    define('SX_RP_DEFAULT_LEAD', 7);    // kung walang supplier
+    define('SX_RP_MIN_ORDERS', 3);      // mas kaunti dito = kulang pa ang datos
+
+    /** product_id => ['mean', 'sd', 'orders', 'sold_days', 'capped', 'units'] */
+    function sx_demand_stats(PDO $pdo, int $days = SX_VELOCITY_DAYS): array
+    {
+        $days = max(7, min(365, $days));
+        $stmt = $pdo->prepare("
+            SELECT oi.product_id, DATE(o.created_at) AS d, SUM(oi.quantity) AS q, COUNT(DISTINCT o.id) AS n,
+                   GREATEST(7, LEAST(:days, DATEDIFF(NOW(), p.created_at))) AS span
+            FROM order_items oi
+            JOIN orders o   ON o.id = oi.order_id
+            JOIN products p ON p.id = oi.product_id
+            WHERE o.status <> 'cancelled' AND o.created_at >= DATE_SUB(NOW(), INTERVAL :days2 DAY)
+            GROUP BY oi.product_id, p.created_at, DATE(o.created_at)
+        ");
+        $stmt->execute([':days' => $days, ':days2' => $days]);
+        $byProduct = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $byProduct[(int)$r['product_id']]['span'] = max(7, (int)$r['span']);
+            $byProduct[(int)$r['product_id']]['days'][] = ['q' => (int)$r['q'], 'n' => (int)$r['n']];
+        }
+        $out = [];
+        foreach ($byProduct as $pid => $info) {
+            $qs = array_column($info['days'], 'q');
+            sort($qs);
+            $mid = intdiv(count($qs), 2);
+            $median = count($qs) % 2 ? $qs[$mid] : ($qs[$mid - 1] + $qs[$mid]) / 2;
+            $cap = max(10, 5 * $median);             // ang isang araw ay hindi lalampas ng 5× ng karaniwang araw ng benta (min. 10 pcs)
+            $span = $info['span'];
+            $sum = $sumSq = 0.0;
+            $capped = false;
+            foreach ($qs as $q) {
+                if ($q > $cap) { $q = $cap; $capped = true; }
+                $sum += $q;
+                $sumSq += $q * $q;
+            }
+            $mean = $sum / $span;
+            $out[$pid] = [
+                'mean'      => $mean,
+                'sd'        => sqrt(max(0.0, $sumSq / $span - $mean * $mean)),
+                'orders'    => array_sum(array_column($info['days'], 'n')),
+                'sold_days' => count($qs),
+                'capped'    => $capped,
+                'units'     => (int)array_sum($qs),
+            ];
+        }
+        return $out;
+    }
+
+    /** [reorder_point, reorder_qty, safety_stock] mula sa stats at lead time. */
+    function sx_reorder_point_math(float $mean, float $sd, int $lead): array
+    {
+        $lead   = max(1, $lead);
+        $safety = (int)ceil(SX_RP_Z * $sd * sqrt($lead));
+        $rp     = (int)ceil($mean * $lead + $safety);
+        return [min(100000, max(1, $rp)), min(100000, max(1, (int)ceil($mean * SX_RP_CYCLE_DAYS))), $safety];
+    }
+
+    /**
+     * Mungkahi para sa bawat product. status: raise | lower | same | no_data
+     * (same = nasa loob ng 10% o 1 pc ng kasalukuyan).
+     */
+    function sx_reorder_suggestions(PDO $pdo, int $days = SX_VELOCITY_DAYS): array
+    {
+        $stats = sx_demand_stats($pdo, $days);
+        $rows = $pdo->query("
+            SELECT p.id, p.name, p.sku, p.image_path, p.reorder_point, p.reorder_qty, p.supplier_id,
+                   s.name AS supplier_name, s.lead_time_days,
+                   COALESCE((SELECT SUM(i.quantity) FROM inventory i WHERE i.product_id = p.id), 0) AS stock
+            FROM products p LEFT JOIN suppliers s ON s.id = p.supplier_id
+            ORDER BY p.name
+        ")->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as &$r) {
+            $st = $stats[(int)$r['id']] ?? null;
+            $r['lead_assumed'] = $r['lead_time_days'] === null;
+            $r['lead']   = $r['lead_assumed'] ? SX_RP_DEFAULT_LEAD : (int)$r['lead_time_days'];
+            $r['stats']  = $st;
+            $r['new_rp'] = $r['new_rq'] = $r['safety'] = null;
+            if (!$st || $st['orders'] < SX_RP_MIN_ORDERS || $st['sold_days'] < 2) {
+                $r['status'] = 'no_data';
+                continue;
+            }
+            [$r['new_rp'], $r['new_rq'], $r['safety']] = sx_reorder_point_math($st['mean'], $st['sd'], $r['lead']);
+            $old = (int)$r['reorder_point'];
+            $r['status'] = abs($r['new_rp'] - $old) <= max(1, (int)round($old * 0.1)) ? 'same'
+                         : ($r['new_rp'] > $old ? 'raise' : 'lower');
+        }
+        return $rows;
+    }
+
+    /**
+     * I-apply ang mga mungkahi sa napiling product. Kinukuwenta ulit dito sa server (hindi
+     * pinagkakatiwalaan ang numerong galing sa form). Binabalik ang bilang ng na-update.
+     */
+    function sx_apply_reorder_points(PDO $pdo, array $productIds, int $days): int
+    {
+        $want = array_flip(array_map('intval', $productIds));
+        $upd = $pdo->prepare("UPDATE products SET reorder_point = ?, reorder_qty = ? WHERE id = ?");
+        $n = 0;
+        $pdo->beginTransaction();
+        try {
+            foreach (sx_reorder_suggestions($pdo, $days) as $r) {
+                if (!isset($want[(int)$r['id']]) || !in_array($r['status'], ['raise', 'lower'], true)) continue;
+                $upd->execute([$r['new_rp'], $r['new_rq'], $r['id']]);
+                $n += $upd->rowCount() > 0 ? 1 : 0;
+            }
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        return $n;
+    }
 }
