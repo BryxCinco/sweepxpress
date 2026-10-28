@@ -1,51 +1,13 @@
 <?php
-// includes/order_document.php — iisang printable na dokumento para sa Invoice.php at customers/UserReceipt.php.
+// includes/order_document.php — iisang printable na dokumento para sa Invoice.php at customers/UserReceipt.php
+// (at ang CSS nito, sx_document_css(), para sa restock PO print).
 // Hindi dumadaan sa header.php (walang navbar) para malinis kapag pini-print o sine-save bilang PDF.
 
 if (!function_exists('sx_order_document')) {
-    /**
-     * $doc keys:
-     *   title      — "Official receipt", "Invoice", "Order summary"
-     *   order      — row ng orders (kasama ang email, delivery_date kung meron)
-     *   items      — [quantity, price, name]
-     *   stamp      — teksto ng stamp (hal. "Paid") o null
-     *   due        — due date (para sa PO na may Net terms) o null
-     *   backHref / backLabel
-     */
-    function sx_order_document(array $doc): void
+    // Style ng printable na papel (puti, A4). Ginagamit din ng admin/purchase_order_print.php.
+    function sx_document_css(): void
     {
-        $e     = fn($s) => htmlspecialchars((string)($s ?? ''), ENT_QUOTES, 'UTF-8');
-        $peso  = fn($n) => '₱' . number_format((float)$n, 2);
-        $order = $doc['order'];
-        $items = $doc['items'];
-
-        $subtotal = 0;
-        foreach ($items as $it) $subtotal += (float)$it['price'] * (int)$it['quantity'];
-        $deliveryFee = max(0, (float)$order['total'] - $subtotal);
-
-        $statusLabels = [
-            'Pending PO' => 'PO under review', 'shipped' => 'Preparing',
-            'cancellation_requested' => 'Cancel requested',
-        ];
-        $status  = $statusLabels[$order['status']] ?? ucfirst(str_replace('_', ' ', $order['status']));
-        $payment = $order['payment_terms']
-            ?: ($order['payment_method'] === 'COD' ? 'Cash on delivery' : $order['payment_method']);
-        $docNo   = strtoupper(substr($doc['title'], 0, 3)) . '-' . date('Y', strtotime($order['created_at'])) . '-' . str_pad((string)$order['id'], 5, '0', STR_PAD_LEFT);
-        $isPO    = ($order['order_type'] ?? '') === 'B2B' || $order['status'] === 'Pending PO';
         ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= $e($doc['title']) ?> #<?= (int)$order['id'] ?> · SweepXpress</title>
-<?php require __DIR__ . '/theme_init.php'; // ang papel ay laging puti; ang paligid lang ang dumidilim ?>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-    <link rel="stylesheet" href="/sweepxpress/assets/style.css?v=<?= filemtime(__DIR__ . '/../assets/style.css') ?>">
-    <link rel="icon" type="image/png" sizes="32x32" href="/sweepxpress/assets/brand/favicon-32.png">
     <style>
     body { background: var(--sx-surface-alt); }
     .doc-wrap { max-width: 860px; margin: 0 auto; padding: var(--sx-space-5) var(--sx-space-4) var(--sx-space-8); }
@@ -142,6 +104,53 @@ if (!function_exists('sx_order_document')) {
         .doc-table tr { break-inside: avoid; }
     }
     </style>
+        <?php
+    }
+
+    /**
+     * $doc keys:
+     *   title      — "Official receipt", "Invoice", "Order summary"
+     *   order      — row ng orders (kasama ang email, delivery_date kung meron)
+     *   items      — [quantity, price, name]
+     *   stamp      — teksto ng stamp (hal. "Paid") o null
+     *   due        — due date (para sa PO na may Net terms) o null
+     *   backHref / backLabel
+     */
+    function sx_order_document(array $doc): void
+    {
+        $e     = fn($s) => htmlspecialchars((string)($s ?? ''), ENT_QUOTES, 'UTF-8');
+        $peso  = fn($n) => '₱' . number_format((float)$n, 2);
+        $order = $doc['order'];
+        $items = $doc['items'];
+
+        $subtotal = 0;
+        foreach ($items as $it) $subtotal += (float)$it['price'] * (int)$it['quantity'];
+        $deliveryFee = max(0, (float)$order['total'] - $subtotal);
+
+        $statusLabels = [
+            'Pending PO' => 'PO under review', 'shipped' => 'Preparing',
+            'cancellation_requested' => 'Cancel requested',
+        ];
+        $status  = $statusLabels[$order['status']] ?? ucfirst(str_replace('_', ' ', $order['status']));
+        $payment = $order['payment_terms']
+            ?: ($order['payment_method'] === 'COD' ? 'Cash on delivery' : $order['payment_method']);
+        $docNo   = strtoupper(substr($doc['title'], 0, 3)) . '-' . date('Y', strtotime($order['created_at'])) . '-' . str_pad((string)$order['id'], 5, '0', STR_PAD_LEFT);
+        $isPO    = ($order['order_type'] ?? '') === 'B2B' || $order['status'] === 'Pending PO';
+        ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?= $e($doc['title']) ?> #<?= (int)$order['id'] ?> · SweepXpress</title>
+<?php require __DIR__ . '/theme_init.php'; // ang papel ay laging puti; ang paligid lang ang dumidilim ?>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="stylesheet" href="/sweepxpress/assets/style.css?v=<?= filemtime(__DIR__ . '/../assets/style.css') ?>">
+    <link rel="icon" type="image/png" sizes="32x32" href="/sweepxpress/assets/brand/favicon-32.png">
+    <?php sx_document_css(); ?>
 </head>
 <body>
 <div class="doc-wrap">

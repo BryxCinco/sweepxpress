@@ -26,6 +26,7 @@ if (is_admin()) {
             ['admin/customer_management.php', 'fa-users', 'Customers', ['admin/customer_management.php', 'admin/user_actions.php', 'admin/edit_role.php', 'admin/view_logs.php']],
         ],
         'Supply chain' => [
+            ['admin/purchase_orders.php', 'fa-file-invoice', 'Purchase orders', ['admin/purchase_order*']],
             ['admin/suppliers.php', 'fa-truck-field', 'Suppliers', ['admin/suppliers.php', 'admin/supplier.php']],
         ],
         'Insights' => [

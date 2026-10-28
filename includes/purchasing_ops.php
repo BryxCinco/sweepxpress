@@ -301,4 +301,38 @@ if (!function_exists('sx_po_statuses')) {
         $po['items'] = $i->fetchAll(PDO::FETCH_ASSOC);
         return $po;
     }
+
+    // POST arrays (product_id[], qty[], unit_cost[]) → mga linya para sa sx_po_clean_lines
+    function sx_po_lines_from_post(): array
+    {
+        $lines = [];
+        foreach ((array)($_POST['product_id'] ?? []) as $i => $pid) {
+            $lines[] = ['product_id' => $pid, 'qty' => $_POST['qty'][$i] ?? 0, 'unit_cost' => $_POST['unit_cost'][$i] ?? ''];
+        }
+        return $lines;
+    }
+
+    // Darating pa: [product_id => units] mula sa sent/partial na PO (hindi kasama ang draft)
+    function sx_po_on_order(PDO $pdo): array
+    {
+        return $pdo->query("
+            SELECT poi.product_id, SUM(poi.qty_ordered - poi.qty_received) AS qty
+            FROM purchase_order_items poi
+            JOIN purchase_orders po ON po.id = poi.po_id
+            WHERE po.status IN ('sent', 'partial')
+            GROUP BY poi.product_id
+        ")->fetchAll(PDO::FETCH_KEY_PAIR);
+    }
+
+    /**
+     * Ilang units ang dapat i-order (0 = hindi pa kailangan).
+     * Kailangan kapag stock + darating pa ≤ reorder point. Dami: reorder_qty kung naka-set,
+     * kung hindi, sapat para umabot sa 2× ng reorder point.
+     */
+    function sx_po_suggest_qty(int $stock, int $onOrder, int $reorderPoint, ?int $reorderQty): int
+    {
+        if ($stock + $onOrder > $reorderPoint) return 0;
+        if ($reorderQty) return $reorderQty;
+        return max(1, $reorderPoint * 2 - $stock - $onOrder);
+    }
 }

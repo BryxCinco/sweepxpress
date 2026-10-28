@@ -215,6 +215,9 @@ require_once __DIR__ . '/../includes/header.php';
                 <?php if (!$editing): ?>
                     <a href="supplier.php?id=<?= $id ?>&amp;edit=1#details" class="sx-btn sx-btn-outline sx-btn-sm"><i class="fa-solid fa-pen"></i> Edit</a>
                 <?php endif; ?>
+                <?php if ($supplier['is_active']): ?>
+                    <a href="purchase_order.php?supplier=<?= $id ?>" class="sx-btn sx-btn-primary sx-btn-sm"><i class="fa-solid fa-plus"></i> New purchase order</a>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -333,7 +336,10 @@ require_once __DIR__ . '/../includes/header.php';
                 </section>
 
                 <section class="sx-card" style="padding: 0; overflow: hidden">
-                    <h2 class="pf-title" style="padding: var(--sx-space-5) var(--sx-space-5) 0">Purchase orders</h2>
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; padding: var(--sx-space-5) var(--sx-space-5) 0">
+                        <h2 class="pf-title">Purchase orders</h2>
+                        <?php if ($orders): ?><a href="purchase_orders.php?tab=all&amp;supplier=<?= $id ?>" class="sx-hint">All orders →</a><?php endif; ?>
+                    </div>
                     <?php if ($orders): ?>
                         <div class="sx-table-wrap" style="border: 0; border-radius: 0">
                             <table class="sx-table su-table">
