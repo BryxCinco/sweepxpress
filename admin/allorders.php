@@ -27,7 +27,12 @@ $type   = isset($types[$_GET['type'] ?? '']) ? $_GET['type'] : 'all';
 $search = trim($_GET['q'] ?? '');
 $year   = ctype_digit($_GET['year'] ?? '') ? (int)$_GET['year'] : 0;
 $month  = ctype_digit($_GET['month'] ?? '') && (int)$_GET['month'] >= 1 && (int)$_GET['month'] <= 12 ? (int)$_GET['month'] : 0;
-$limit  = 20;
+$limit  = 24;
+
+// Cards (default) o List; tinatandaan sa cookie ng browser na ito
+$view = in_array($_GET['view'] ?? '', ['cards', 'list'], true) ? $_GET['view'] : ($_COOKIE['sx_orders_view'] ?? 'cards');
+if ($view !== 'list') $view = 'cards';
+if (isset($_GET['view'])) setcookie('sx_orders_view', $view, ['expires' => time() + 31536000, 'path' => '/sweepxpress/admin/', 'samesite' => 'Lax']);
 $page   = max(1, (int)($_GET['page'] ?? 1));
 
 // Business = B2B order, PO, o account na business (lumang PO ay naka-save na B2C)
@@ -72,7 +77,9 @@ $stmt = $pdo->prepare("
     SELECT o.id, o.status, o.total, o.created_at, o.order_type, o.payment_terms, o.customer_name,
            u.name AS account_name, u.email, u.role,
            (SELECT SUM(quantity) FROM order_items WHERE order_id = o.id) AS units,
-           (SELECT MAX(delivery_date) FROM deliveries WHERE order_id = o.id) AS delivery_date
+           (SELECT MAX(delivery_date) FROM deliveries WHERE order_id = o.id) AS delivery_date,
+           (SELECT GROUP_CONCAT(COALESCE(p.image_path, '') ORDER BY oi.id SEPARATOR '|')
+              FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id WHERE oi.order_id = o.id) AS thumbs
     {$from}
     WHERE {$listWhere}
     ORDER BY o.created_at DESC, o.id DESC
@@ -83,6 +90,23 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 $years = $pdo->query("SELECT DISTINCT YEAR(created_at) FROM orders ORDER BY 1 DESC")->fetchAll(PDO::FETCH_COLUMN);
 $requestCount = (int)($byStatus['cancellation_requested'] ?? 0);
+
+// Bento (lahat ng order, hindi apektado ng filter)
+$sum = $pdo->query("
+    SELECT SUM(status IN ('pending','Pending PO')) AS to_process,
+           SUM(status IN ('preparing','shipped')) AS preparing,
+           SUM(DATE(created_at) = CURDATE()) AS today,
+           COALESCE(SUM(CASE WHEN status IN ('delivered','completed') AND created_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01') THEN total END), 0) AS month_revenue
+    FROM orders
+")->fetch(PDO::FETCH_ASSOC);
+$placeholder = '/sweepxpress/assets/placeholder.jpg';
+$ago = function (string $ts): string {
+    $sec = time() - strtotime($ts);
+    if ($sec < 3600) return max(1, (int)floor($sec / 60)) . 'm ago';
+    if ($sec < 86400) return (int)floor($sec / 3600) . 'h ago';
+    if ($sec < 7 * 86400) return (int)floor($sec / 86400) . 'd ago';
+    return date('M j, Y', strtotime($ts));
+};
 
 $url = function (array $changes = []) use ($tab, $type, $search, $year, $month, $page) {
     $q = array_filter(array_merge([
@@ -101,12 +125,28 @@ require_once __DIR__ . '/../includes/header.php';
 
 <style>
 /* ============================================================
-   ADMIN ORDERS (Phase 9f) — tokens + sx-table / sx-chip / sx-pill mula sa assets/style.css
+   ADMIN ORDERS (Phase 9i) — bento + isang card bawat order (may List toggle); tokens mula sa assets/style.css
    ============================================================ */
 .ol { max-width: 1440px; padding-block: var(--sx-space-5) var(--sx-space-8); }
 .ol-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--sx-space-3); margin-bottom: var(--sx-space-5); }
 .ol-head p { margin: var(--sx-space-2) 0 0; color: var(--sx-muted); }
 .ol-head-actions { display: flex; flex-wrap: wrap; gap: var(--sx-space-2); }
+
+/* Bento */
+.ol-bento { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sx-space-3); margin-bottom: var(--sx-space-5); }
+.ol-tile { display: grid; align-content: space-between; gap: var(--sx-space-2); min-height: 100px; padding: var(--sx-space-4); color: inherit; text-decoration: none; }
+.ol-tile span { font-size: var(--sx-text-xs); font-weight: var(--sx-weight-semibold); color: var(--sx-muted); }
+.ol-tile strong { font-size: 1.7rem; font-weight: var(--sx-weight-extrabold); line-height: 1; color: var(--sx-dark); }
+.ol-tile small { font-size: var(--sx-text-xs); color: var(--sx-muted); }
+.ol-tile.hero { grid-column: span 2; background: var(--sx-gradient-brand); color: #fff; }
+.ol-tile.hero span, .ol-tile.hero small { color: rgba(255, 255, 255, 0.8); }
+.ol-tile.hero strong { color: #fff; font-size: 2.2rem; }
+.ol-tile.warn strong { color: var(--sx-status-pending); }
+.ol-tile.bad strong { color: var(--sx-status-cancelled); }
+a.ol-tile { transition: transform var(--sx-transition), box-shadow var(--sx-transition); }
+a.ol-tile:hover { transform: translateY(-2px); box-shadow: var(--sx-shadow-md); }
+
+/* Tabs + filters */
 .ol-tabs { display: flex; gap: var(--sx-space-2); margin-bottom: var(--sx-space-3); overflow-x: auto; scrollbar-width: none; }
 .ol-tabs::-webkit-scrollbar { display: none; }
 .ol-tabs .sx-chip { flex-shrink: 0; }
@@ -116,15 +156,43 @@ require_once __DIR__ . '/../includes/header.php';
 .ol-filters form { display: flex; flex-wrap: wrap; gap: var(--sx-space-2); align-items: center; }
 .ol-filters .sx-input { flex: 1 1 220px; min-width: 0; }
 .ol-filters .sx-select { width: auto; flex: 0 0 auto; }
+.ol-view { display: inline-flex; margin-left: auto; padding: 3px; border: 1px solid var(--sx-border-light); border-radius: var(--sx-radius-pill); background: var(--sx-surface); }
+.ol-view a { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: var(--sx-radius-pill); color: var(--sx-muted); font-size: var(--sx-text-sm); font-weight: var(--sx-weight-semibold); text-decoration: none; }
+.ol-view a.on { background: var(--sx-dark); color: var(--sx-on-dark); }
+
+/* Cards */
+.ol-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--sx-space-4); }
+.ol-card { display: flex; flex-direction: column; gap: var(--sx-space-4); padding: var(--sx-space-4); cursor: pointer; transition: transform var(--sx-transition), box-shadow var(--sx-transition), border-color var(--sx-transition); }
+.ol-card:hover { transform: translateY(-4px); box-shadow: var(--sx-shadow-lg); border-color: color-mix(in srgb, var(--sx-primary) 30%, transparent); }
+.ol-card.hot { border-color: color-mix(in srgb, var(--sx-status-pending) 40%, transparent); }
+.ol-card-top { display: flex; align-items: center; justify-content: space-between; gap: var(--sx-space-2); }
+.ol-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: var(--sx-weight-bold); color: var(--sx-dark); text-decoration: none; }
+.ol-id:hover { color: var(--sx-primary); }
+.ol-tag { margin-left: 6px; padding: 1px 6px; border-radius: var(--sx-radius-pill); background: var(--sx-primary-soft); color: var(--sx-primary); font-size: 10px; font-weight: var(--sx-weight-bold); }
+.ol-who { display: flex; align-items: center; gap: var(--sx-space-3); min-width: 0; }
+.ol-av { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; border-radius: 50%; background: var(--sx-primary-soft); color: var(--sx-primary); font-size: var(--sx-text-sm); font-weight: var(--sx-weight-extrabold); }
+.ol-av.b2b { background: var(--sx-accent-soft); color: var(--sx-accent-dark); }
+.ol-who div { min-width: 0; }
+.ol-who strong { display: block; overflow: hidden; color: var(--sx-dark); text-overflow: ellipsis; white-space: nowrap; }
+.ol-who small { display: block; overflow: hidden; font-size: var(--sx-text-xs); color: var(--sx-muted); text-overflow: ellipsis; white-space: nowrap; }
+.ol-thumbs { display: flex; align-items: center; }
+.ol-thumbs img, .ol-thumbs span { width: 40px; height: 40px; margin-right: -10px; border: 2px solid var(--sx-surface); border-radius: var(--sx-radius-md); background: var(--sx-surface-alt); object-fit: cover; }
+.ol-thumbs span { display: grid; place-items: center; color: var(--sx-muted); font-size: var(--sx-text-xs); font-weight: var(--sx-weight-bold); }
+.ol-thumbs em { margin-left: var(--sx-space-4); font-size: var(--sx-text-xs); font-style: normal; color: var(--sx-muted); }
+.ol-card-foot { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sx-space-2); margin-top: auto; padding-top: var(--sx-space-3); border-top: 1px solid var(--sx-border-light); }
+.ol-card-foot b { font-size: var(--sx-text-xl); font-weight: var(--sx-weight-extrabold); color: var(--sx-dark); }
+.ol-card-foot small { display: block; font-size: var(--sx-text-xs); color: var(--sx-muted); text-align: right; }
+.ol-card-foot small i { margin-right: 4px; color: var(--sx-primary); }
+
+/* List */
 .ol-table tbody tr { cursor: pointer; }
 .ol-table .num { text-align: right; white-space: nowrap; }
 .ol-table .muted { color: var(--sx-muted); font-size: var(--sx-text-sm); white-space: nowrap; }
 .ol-table .who strong { display: block; color: var(--sx-dark); }
 .ol-table .who small { color: var(--sx-muted); }
-.ol-id { font-weight: var(--sx-weight-bold); color: var(--sx-dark); text-decoration: none; }
-.ol-id:hover { color: var(--sx-primary); }
-.ol-tag { margin-left: 6px; padding: 1px 6px; border-radius: var(--sx-radius-pill); background: var(--sx-primary-soft); color: var(--sx-primary); font-size: 10px; font-weight: var(--sx-weight-bold); }
-@media (max-width: 767.98px) { .ol-table .hide-sm { display: none; } }
+
+@media (min-width: 768px) { .ol-bento { grid-template-columns: 1.6fr repeat(3, 1fr); } .ol-tile.hero { grid-column: span 1; } }
+@media (max-width: 767.98px) { .ol-table .hide-sm { display: none; } .ol-view { margin-left: 0; } }
 </style>
 
 <div class="ol sx-container">
@@ -139,6 +207,23 @@ require_once __DIR__ . '/../includes/header.php';
             <a href="orders_cancellation.php" class="sx-btn sx-btn-outline sx-btn-sm"><i class="fa-solid fa-ban"></i> Cancel requests<?= $requestCount ? " ({$requestCount})" : '' ?></a>
             <a href="<?= h($pdfUrl) ?>" target="_blank" class="sx-btn sx-btn-primary sx-btn-sm"><i class="fa-solid fa-file-pdf"></i> PDF report</a>
         </div>
+    </div>
+
+    <div class="ol-bento">
+        <div class="sx-card ol-tile hero">
+            <span>Revenue this month</span>
+            <strong>₱<?= number_format((float)$sum['month_revenue'], 0) ?></strong>
+            <small>Delivered &amp; completed since <?= date('M 1') ?></small>
+        </div>
+        <a href="<?= h($url(['tab' => 'pending', 'page' => null])) ?>" class="sx-card ol-tile<?= $sum['to_process'] ? ' warn' : '' ?>">
+            <span>To process</span><strong><?= (int)$sum['to_process'] ?></strong><small>Pending and PO review</small>
+        </a>
+        <a href="<?= h($url(['tab' => 'preparing', 'page' => null])) ?>" class="sx-card ol-tile">
+            <span>Preparing</span><strong><?= (int)$sum['preparing'] ?></strong><small>Packed or on the way</small>
+        </a>
+        <a href="orders_cancellation.php" class="sx-card ol-tile<?= $requestCount ? ' bad' : '' ?>">
+            <span>Cancel requests</span><strong><?= $requestCount ?></strong><small><?= (int)$sum['today'] ?> new order<?= (int)$sum['today'] === 1 ? '' : 's' ?> today</small>
+        </a>
     </div>
 
     <nav class="ol-tabs" aria-label="Filter by status">
@@ -167,10 +252,57 @@ require_once __DIR__ . '/../includes/header.php';
             <?php if ($search || $year || $month || $type !== 'all'): ?>
                 <a href="<?= h($url(['q' => null, 'type' => null, 'year' => null, 'month' => null, 'page' => null])) ?>" class="sx-btn sx-btn-ghost sx-btn-sm">Clear</a>
             <?php endif; ?>
+            <nav class="ol-view" aria-label="View">
+                <a href="<?= h($url(['view' => 'cards'])) ?>" class="<?= $view === 'cards' ? 'on' : '' ?>"><i class="fa-solid fa-grip"></i> Cards</a>
+                <a href="<?= h($url(['view' => 'list'])) ?>" class="<?= $view === 'list' ? 'on' : '' ?>"><i class="fa-solid fa-list"></i> List</a>
+            </nav>
         </form>
     </div>
 
-    <?php if ($orders): ?>
+    <?php if ($orders && $view === 'cards'): ?>
+        <div class="ol-grid">
+            <?php foreach ($orders as $o):
+                $isB2B = $o['order_type'] === 'B2B' || $o['status'] === 'Pending PO' || $o['role'] === 'business';
+                $link  = 'order_details.php?id=' . (int)$o['id'];
+                $name  = $o['account_name'] ?: ($o['customer_name'] ?: 'Guest');
+                $words = preg_split('/\s+/', trim($name)) ?: ['?'];
+                $init  = mb_strtoupper(mb_substr($words[0], 0, 1) . (isset($words[1]) ? mb_substr($words[1], 0, 1) : ''));
+                $imgs  = $o['thumbs'] !== null && $o['thumbs'] !== '' ? explode('|', $o['thumbs']) : [];
+                $hot   = in_array($o['status'], ['pending', 'Pending PO', 'cancellation_requested'], true);
+            ?>
+                <article class="sx-card ol-card<?= $hot ? ' hot' : '' ?>" data-href="<?= $link ?>">
+                    <div class="ol-card-top">
+                        <span>
+                            <a href="<?= $link ?>" class="ol-id">#<?= (int)$o['id'] ?></a>
+                            <?php if ($isB2B): ?><span class="ol-tag"><?= $o['payment_terms'] && str_starts_with($o['payment_terms'], 'Net') ? h($o['payment_terms']) : 'B2B' ?></span><?php endif; ?>
+                        </span>
+                        <?= sx_order_status_pill($o['status']) ?>
+                    </div>
+                    <div class="ol-who">
+                        <span class="ol-av<?= $isB2B ? ' b2b' : '' ?>" aria-hidden="true"><?= h($init) ?></span>
+                        <div>
+                            <strong><?= h($name) ?></strong>
+                            <small><?= h($o['email'] ?: 'Guest order') ?></small>
+                        </div>
+                    </div>
+                    <div class="ol-thumbs" aria-label="<?= count($imgs) ?> product line<?= count($imgs) === 1 ? '' : 's' ?>">
+                        <?php foreach (array_slice($imgs, 0, 4) as $img): ?>
+                            <img src="<?= h($img ?: $placeholder) ?>" alt="" loading="lazy" onerror="this.src='<?= $placeholder ?>'">
+                        <?php endforeach; ?>
+                        <?php if (count($imgs) > 4): ?><span>+<?= count($imgs) - 4 ?></span><?php endif; ?>
+                        <em><?= (int)$o['units'] ?> unit<?= (int)$o['units'] === 1 ? '' : 's' ?></em>
+                    </div>
+                    <div class="ol-card-foot">
+                        <b>₱<?= number_format((float)$o['total'], 2) ?></b>
+                        <div>
+                            <small><i class="fa-regular fa-clock"></i><?= $ago($o['created_at']) ?></small>
+                            <?php if ($o['delivery_date']): ?><small><i class="fa-solid fa-truck-fast"></i><?= date('M j', strtotime($o['delivery_date'])) ?></small><?php endif; ?>
+                        </div>
+                    </div>
+                </article>
+            <?php endforeach; ?>
+        </div>
+    <?php elseif ($orders): ?>
         <div class="sx-card" style="padding: 0; overflow: hidden">
             <div class="sx-table-wrap" style="border: 0; border-radius: 0">
                 <table class="sx-table ol-table">
@@ -211,6 +343,8 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
         </div>
 
+    <?php endif; ?>
+    <?php if ($orders): ?>
         <div class="ap-pager">
             <span>Showing <?= $offset + 1 ?>–<?= $offset + count($orders) ?> of <?= number_format($total) ?></span>
             <?php if ($totalPages > 1): ?>
@@ -234,7 +368,7 @@ require_once __DIR__ . '/../includes/header.php';
 </div>
 
 <script>
-document.querySelectorAll('.ol-table tr[data-href]').forEach((tr) => tr.addEventListener('click', (e) => {
+document.querySelectorAll('.ol-table tr[data-href], .ol-card[data-href]').forEach((tr) => tr.addEventListener('click', (e) => {
     if (!e.target.closest('a')) window.location.href = tr.dataset.href;
 }));
 </script>

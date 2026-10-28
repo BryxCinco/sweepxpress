@@ -9,6 +9,7 @@ require_once __DIR__ . '/../includes/auth.php';
 if (!is_admin()) { header("Location: /sweepxpress/login.php"); exit; }
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../includes/admin_products.php';
+require_once __DIR__ . '/../includes/purchasing_ops.php'; // sx_po_on_order
 
 // =================================================================================
 // 1. CSV EXPORT
@@ -64,7 +65,7 @@ $valData = $pdo->query("
 // =================================================================================
 // 3. LIST
 // =================================================================================
-$limit  = 15;
+$limit  = 24;
 $page   = max(1, (int)($_GET['page'] ?? 1));
 $search = trim($_GET['search'] ?? '');
 $filter = in_array($_GET['filter'] ?? '', ['low', 'out'], true) ? $_GET['filter'] : 'all';
@@ -82,13 +83,15 @@ $havingClause = match ($filter) {
 };
 
 $base = "
-    SELECT p.id, p.name, COALESCE(p.sku, '') AS sku, COALESCE(p.price, 0) AS price, p.image_path, p.reorder_point,
+    SELECT p.id, p.name, COALESCE(p.sku, '') AS sku, COALESCE(p.price, 0) AS price, p.cost_price, p.image_path, p.reorder_point,
+           p.category, s.name AS supplier_name,
            IFNULL(SUM(i.quantity), 0) AS real_stock,
            (SELECT MAX(created_at) FROM stock_movements WHERE product_id = p.id) AS last_move
     FROM products p
     LEFT JOIN inventory i ON i.product_id = p.id
+    LEFT JOIN suppliers s ON s.id = p.supplier_id
     {$whereSql}
-    GROUP BY p.id, p.name, p.sku, p.price, p.image_path, p.reorder_point
+    GROUP BY p.id, p.name, p.sku, p.price, p.cost_price, p.image_path, p.reorder_point, p.category, s.name
     {$havingClause}
 ";
 
@@ -104,6 +107,8 @@ $order = $filter === 'all' ? '(real_stock > reorder_point), real_stock ASC, name
 $stmt = $pdo->prepare("SELECT * FROM ({$base}) t ORDER BY {$order} LIMIT {$limit} OFFSET {$offset}");
 $stmt->execute($params);
 $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$onOrder  = sx_po_on_order($pdo);
+$incoming = array_sum($onOrder);
 
 $flash = sx_flash();
 $placeholder = '/sweepxpress/assets/placeholder.jpg';
@@ -118,64 +123,83 @@ require_once __DIR__ . '/../includes/header.php';
 
 <style>
 /* ============================================================
-   INVENTORY (Phase 9e) — tokens + sx-table / sx-chip / ap-stock mula sa assets/style.css
+   INVENTORY (Phase 9i) — bento + isang card bawat produkto; tokens mula sa assets/style.css
    ============================================================ */
 .iv { max-width: 1440px; padding-block: var(--sx-space-5) var(--sx-space-8); }
 .iv-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--sx-space-3); margin-bottom: var(--sx-space-5); }
 .iv-head p { margin: var(--sx-space-2) 0 0; color: var(--sx-muted); }
 .iv-head-actions { display: flex; flex-wrap: wrap; gap: var(--sx-space-2); }
 
-.iv-kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sx-space-3); margin-bottom: var(--sx-space-4); }
-.iv-kpi { padding: var(--sx-space-4); color: inherit; text-decoration: none; }
-.iv-kpi span { display: block; font-size: var(--sx-text-xs); font-weight: var(--sx-weight-semibold); color: var(--sx-muted); }
-.iv-kpi strong { display: block; margin-top: 4px; font-size: clamp(1.2rem, 1rem + 0.8vw, 1.6rem); font-weight: var(--sx-weight-extrabold); color: var(--sx-dark); }
-.iv-kpi.warn strong { color: var(--sx-status-pending); }
-.iv-kpi.danger strong { color: var(--sx-status-cancelled); }
-a.iv-kpi:hover { box-shadow: var(--sx-shadow-md); }
-
-.iv-moves { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sx-space-2); margin-bottom: var(--sx-space-4); }
-.iv-move {
-    display: flex;
-    align-items: center;
-    gap: var(--sx-space-3);
-    padding: var(--sx-space-3) var(--sx-space-4);
-    border: 1px solid var(--sx-border-light);
-    border-radius: var(--sx-radius-md);
-    background: var(--sx-surface);
-    color: var(--sx-dark);
-    font-weight: var(--sx-weight-semibold);
-    text-decoration: none;
-}
-.iv-move:hover { border-color: var(--sx-primary); color: var(--sx-primary); }
-.iv-move i { display: grid; place-items: center; width: 34px; height: 34px; border-radius: var(--sx-radius-md); background: var(--sx-primary-soft); color: var(--sx-primary); }
+/* Bento */
+.iv-bento { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sx-space-3); margin-bottom: var(--sx-space-5); }
+.iv-tile { display: grid; align-content: space-between; gap: var(--sx-space-2); min-height: 104px; padding: var(--sx-space-4); color: inherit; text-decoration: none; }
+.iv-tile span { font-size: var(--sx-text-xs); font-weight: var(--sx-weight-semibold); color: var(--sx-muted); }
+.iv-tile strong { font-size: 1.7rem; font-weight: var(--sx-weight-extrabold); line-height: 1; color: var(--sx-dark); }
+.iv-tile small { font-size: var(--sx-text-xs); color: var(--sx-muted); }
+.iv-tile.hero { grid-column: span 2; background: var(--sx-gradient-brand); color: #fff; }
+.iv-tile.hero span, .iv-tile.hero small { color: rgba(255, 255, 255, 0.8); }
+.iv-tile.hero strong { color: #fff; font-size: 2.2rem; }
+.iv-tile.warn strong { color: var(--sx-status-pending); }
+.iv-tile.bad strong { color: var(--sx-status-cancelled); }
+a.iv-tile { transition: transform var(--sx-transition), box-shadow var(--sx-transition); }
+a.iv-tile:hover { transform: translateY(-2px); box-shadow: var(--sx-shadow-md); }
+.iv-moves { grid-column: span 2; display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sx-space-2); padding: var(--sx-space-3); }
+.iv-move { display: flex; align-items: center; gap: var(--sx-space-3); padding: var(--sx-space-2) var(--sx-space-3); border-radius: var(--sx-radius-md); color: var(--sx-dark); font-size: var(--sx-text-sm); font-weight: var(--sx-weight-semibold); text-decoration: none; transition: background var(--sx-transition); }
+.iv-move:hover { background: var(--sx-surface-alt); color: var(--sx-primary); }
+.iv-move i { display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--sx-radius-md); background: var(--sx-primary-soft); color: var(--sx-primary); }
 .iv-move.in i { background: var(--sx-accent-soft); color: var(--sx-accent-dark); }
 .iv-move.out i { background: var(--sx-status-pending-bg); color: var(--sx-status-pending); }
 
+/* Toolbar */
 .iv-tools { display: grid; gap: var(--sx-space-3); margin-bottom: var(--sx-space-4); padding: var(--sx-space-4); }
 .iv-search { display: flex; gap: var(--sx-space-2); }
 .iv-search .sx-input { flex: 1; min-width: 0; }
 .iv-chips { display: flex; flex-wrap: wrap; gap: var(--sx-space-2); }
 .iv-chips .sx-chip span { margin-left: 4px; opacity: 0.75; }
 
-.iv-table tbody tr { cursor: pointer; }
-.iv-table .num { text-align: right; white-space: nowrap; }
-.iv-prod { display: flex; align-items: center; gap: var(--sx-space-3); min-width: 200px; }
-.iv-prod img { flex-shrink: 0; width: 40px; height: 40px; border-radius: var(--sx-radius-md); background: var(--sx-surface-alt); object-fit: cover; }
-.iv-prod strong { display: block; color: var(--sx-dark); }
-.iv-prod small { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--sx-muted); }
-.iv-row-actions { display: flex; justify-content: flex-end; gap: var(--sx-space-1); }
+/* Cards */
+.iv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--sx-space-4); }
+.iv-card { display: flex; flex-direction: column; gap: var(--sx-space-4); padding: var(--sx-space-4); cursor: pointer; transition: transform var(--sx-transition), box-shadow var(--sx-transition), border-color var(--sx-transition); }
+.iv-card:hover { transform: translateY(-4px); box-shadow: var(--sx-shadow-lg); border-color: color-mix(in srgb, var(--sx-primary) 30%, transparent); }
+.iv-card.low { border-color: color-mix(in srgb, var(--sx-status-pending) 35%, transparent); }
+.iv-card.out { border-color: color-mix(in srgb, var(--sx-status-cancelled) 40%, transparent); }
+.iv-card-top { display: flex; align-items: center; gap: var(--sx-space-3); min-width: 0; }
+.iv-card-top img { width: 56px; height: 56px; flex-shrink: 0; border-radius: var(--sx-radius-md); background: var(--sx-surface-alt); object-fit: cover; }
+.iv-card-top div { min-width: 0; flex: 1; }
+.iv-card-top strong { display: block; overflow: hidden; color: var(--sx-dark); text-overflow: ellipsis; white-space: nowrap; }
+.iv-card-top small { display: block; overflow: hidden; font-size: var(--sx-text-xs); color: var(--sx-muted); text-overflow: ellipsis; white-space: nowrap; }
+.iv-card-top small code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.iv-level { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sx-space-2); }
+.iv-level strong { font-size: 2rem; font-weight: var(--sx-weight-extrabold); line-height: 1; letter-spacing: -0.02em; color: var(--sx-dark); }
+.iv-level strong small { margin-left: 4px; font-size: var(--sx-text-sm); font-weight: var(--sx-weight-semibold); color: var(--sx-muted); }
+.iv-card.low .iv-level strong { color: var(--sx-status-pending); }
+.iv-card.out .iv-level strong { color: var(--sx-status-cancelled); }
+.iv-gauge { position: relative; height: 8px; border-radius: var(--sx-radius-pill); background: var(--sx-surface-alt); }
+.iv-gauge i, .iv-gauge b { position: absolute; inset: 0 auto 0 0; border-radius: inherit; }
+.iv-gauge b { background: color-mix(in srgb, var(--sx-primary) 40%, transparent); }
+.iv-gauge i { background: var(--sx-accent); }
+.iv-card.low .iv-gauge i { background: var(--sx-status-pending); }
+.iv-gauge em { position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 2px; background: var(--sx-dark); opacity: 0.5; }
+.iv-gauge-label { display: flex; justify-content: space-between; margin-top: 6px; font-size: var(--sx-text-xs); color: var(--sx-muted); }
+.iv-gauge-label .on { color: var(--sx-primary); font-weight: var(--sx-weight-semibold); }
+.iv-stats { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sx-space-2); }
+.iv-stats div { padding: var(--sx-space-2) var(--sx-space-3); border-radius: var(--sx-radius-md); background: var(--sx-surface-alt); }
+.iv-stats span { display: block; font-size: var(--sx-text-xs); color: var(--sx-muted); }
+.iv-stats b { font-size: var(--sx-text-sm); color: var(--sx-dark); }
+.iv-card-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sx-space-2); margin-top: auto; padding-top: var(--sx-space-3); border-top: 1px solid var(--sx-border-light); }
+.iv-card-foot small { min-width: 0; overflow: hidden; font-size: var(--sx-text-xs); color: var(--sx-muted); text-overflow: ellipsis; white-space: nowrap; }
+.iv-row-actions { display: flex; flex-shrink: 0; gap: var(--sx-space-1); }
 .iv-row-actions .sx-btn { padding: 6px 10px; }
 
+@media (max-width: 767.98px) { .iv-tile.wide-sm { grid-column: span 2; } }
 #scanner-modal .co-dialog-body { min-width: min(420px, 85vw); }
 
 @media (min-width: 768px) {
-    .iv-kpis { grid-template-columns: repeat(4, 1fr); }
-    .iv-moves { grid-template-columns: repeat(4, 1fr); }
+    .iv-bento { grid-template-columns: 1.5fr repeat(3, 1fr); }
+    .iv-tile.hero { grid-column: span 1; grid-row: span 2; }
+    .iv-moves { grid-column: span 3; grid-template-columns: repeat(4, 1fr); }
     .iv-tools { grid-template-columns: minmax(280px, 420px) 1fr; align-items: center; }
     .iv-chips { justify-content: flex-end; }
-}
-@media (max-width: 767.98px) {
-    .iv-table .hide-sm { display: none; }
 }
 </style>
 
@@ -201,18 +225,27 @@ a.iv-kpi:hover { box-shadow: var(--sx-shadow-md); }
         </div>
     <?php endif; ?>
 
-    <div class="iv-kpis">
-        <div class="sx-card iv-kpi"><span>Stock value</span><strong>₱<?= number_format((float)$valData['total_value'], 2) ?></strong></div>
-        <div class="sx-card iv-kpi"><span>Units on hand</span><strong><?= number_format((int)$valData['units']) ?></strong></div>
-        <a href="<?= h($url(['filter' => 'low', 'page' => null])) ?>" class="sx-card iv-kpi warn"><span>Low stock</span><strong><?= (int)$valData['low_stock_count'] ?></strong></a>
-        <a href="<?= h($url(['filter' => 'out', 'page' => null])) ?>" class="sx-card iv-kpi danger"><span>Out of stock</span><strong><?= (int)$valData['out_of_stock_count'] ?></strong></a>
-    </div>
-
-    <div class="iv-moves">
-        <a href="stock_in.php" class="iv-move in"><i class="fa-solid fa-arrow-down"></i> Stock in</a>
-        <a href="stock_out.php" class="iv-move out"><i class="fa-solid fa-arrow-up"></i> Stock out</a>
-        <a href="stock_adjust.php" class="iv-move"><i class="fa-solid fa-sliders"></i> Adjust</a>
-        <a href="inventory_full_history.php" class="iv-move"><i class="fa-solid fa-clock-rotate-left"></i> Full history</a>
+    <div class="iv-bento">
+        <div class="sx-card iv-tile hero">
+            <span>Stock value</span>
+            <strong>₱<?= number_format((float)$valData['total_value'], 0) ?></strong>
+            <small><?= number_format((int)$valData['units']) ?> units on hand · at selling price</small>
+        </div>
+        <a href="<?= h($url(['filter' => 'low', 'page' => null])) ?>" class="sx-card iv-tile<?= $valData['low_stock_count'] ? ' warn' : '' ?>">
+            <span>Low stock</span><strong><?= (int)$valData['low_stock_count'] ?></strong><small>At or below reorder point</small>
+        </a>
+        <a href="<?= h($url(['filter' => 'out', 'page' => null])) ?>" class="sx-card iv-tile<?= $valData['out_of_stock_count'] ? ' bad' : '' ?>">
+            <span>Out of stock</span><strong><?= (int)$valData['out_of_stock_count'] ?></strong><small>Can't be ordered</small>
+        </a>
+        <a href="purchase_orders.php?tab=sent" class="sx-card iv-tile wide-sm">
+            <span>Incoming</span><strong><?= number_format($incoming) ?></strong><small>Units on open purchase orders</small>
+        </a>
+        <nav class="sx-card iv-moves" aria-label="Stock actions">
+            <a href="stock_in.php" class="iv-move in"><i class="fa-solid fa-arrow-down"></i> Stock in</a>
+            <a href="stock_out.php" class="iv-move out"><i class="fa-solid fa-arrow-up"></i> Stock out</a>
+            <a href="stock_adjust.php" class="iv-move"><i class="fa-solid fa-sliders"></i> Adjust</a>
+            <a href="inventory_full_history.php" class="iv-move"><i class="fa-solid fa-clock-rotate-left"></i> Full history</a>
+        </nav>
     </div>
 
     <div class="sx-card iv-tools">
@@ -230,48 +263,49 @@ a.iv-kpi:hover { box-shadow: var(--sx-shadow-md); }
     </div>
 
     <?php if ($products): ?>
-        <div class="sx-card" style="padding: 0; overflow: hidden">
-            <div class="sx-table-wrap" style="border: 0; border-radius: 0">
-                <table class="sx-table iv-table">
-                    <thead>
-                        <tr>
-                            <th>Product</th>
-                            <th class="num hide-sm">Price</th>
-                            <th>Stock</th>
-                            <th class="num hide-sm">Value</th>
-                            <th class="hide-sm">Last movement</th>
-                            <th class="num"><span class="visually-hidden">Actions</span></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($products as $p):
-                            $stock = (int)$p['real_stock'];
-                            $cls = $stock === 0 ? 'out' : ($stock <= (int)$p['reorder_point'] ? 'low' : 'in');
-                            $historyUrl = 'product_history.php?product_id=' . (int)$p['id'];
-                        ?>
-                            <tr data-href="<?= $historyUrl ?>">
-                                <td>
-                                    <div class="iv-prod">
-                                        <img src="<?= h($p['image_path'] ?: $placeholder) ?>" alt="" loading="lazy" onerror="this.src='<?= $placeholder ?>'">
-                                        <div><strong><?= h($p['name']) ?></strong><small><?= h($p['sku'] ?: '—') ?></small></div>
-                                    </div>
-                                </td>
-                                <td class="num hide-sm">₱<?= number_format((float)$p['price'], 2) ?></td>
-                                <td><span class="ap-stock <?= $cls ?>"><?= $stock === 0 ? 'Out' : number_format($stock) ?></span></td>
-                                <td class="num hide-sm">₱<?= number_format($stock * (float)$p['price'], 2) ?></td>
-                                <td class="hide-sm"><?= $p['last_move'] ? date('M j, Y', strtotime($p['last_move'])) : '—' ?></td>
-                                <td>
-                                    <div class="iv-row-actions">
-                                        <a href="stock_in.php?product_id=<?= (int)$p['id'] ?>" class="sx-btn sx-btn-outline sx-btn-sm" title="Stock in" aria-label="Stock in <?= h($p['name']) ?>"><i class="fa-solid fa-plus"></i></a>
-                                        <button type="button" class="sx-btn sx-btn-ghost sx-btn-sm" data-qr="<?= h($p['name']) ?>" title="Print QR label" aria-label="Print QR label for <?= h($p['name']) ?>"><i class="fa-solid fa-qrcode"></i></button>
-                                        <a href="<?= $historyUrl ?>" class="sx-btn sx-btn-ghost sx-btn-sm" title="History" aria-label="History of <?= h($p['name']) ?>"><i class="fa-solid fa-chevron-right"></i></a>
-                                    </div>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
+        <div class="iv-grid">
+            <?php foreach ($products as $p):
+                $stock = (int)$p['real_stock'];
+                $rp    = (int)$p['reorder_point'];
+                $oo    = (int)($onOrder[$p['id']] ?? 0);
+                $cls   = $stock === 0 ? 'out' : ($stock <= $rp ? 'low' : 'in');
+                $max   = max(1, $rp * 3, $stock + $oo);   // sukat ng gauge: hindi bababa sa 3× ng reorder point
+                $historyUrl = 'product_history.php?product_id=' . (int)$p['id'];
+            ?>
+                <article class="sx-card iv-card <?= $cls ?>" data-href="<?= $historyUrl ?>">
+                    <div class="iv-card-top">
+                        <img src="<?= h($p['image_path'] ?: $placeholder) ?>" alt="" loading="lazy" onerror="this.src='<?= $placeholder ?>'">
+                        <div>
+                            <strong><?= h($p['name']) ?></strong>
+                            <small><code><?= h($p['sku'] ?: '—') ?></code> · <?= h($p['category'] ?: 'Uncategorized') ?></small>
+                        </div>
+                        <span class="ap-stock <?= $cls ?>"><?= $cls === 'out' ? 'Out' : ($cls === 'low' ? 'Low' : 'OK') ?></span>
+                    </div>
+                    <div>
+                        <div class="iv-level">
+                            <strong><?= number_format($stock) ?><small>units</small></strong>
+                        </div>
+                        <div class="iv-gauge" role="img" aria-label="<?= $stock ?> in stock<?= $oo ? ", {$oo} on order" : '' ?>, reorder at <?= $rp ?>" style="margin-top: var(--sx-space-2)">
+                            <?php if ($oo): ?><b style="width: <?= min(100, round(($stock + $oo) / $max * 100)) ?>%"></b><?php endif; ?>
+                            <i style="width: <?= min(100, round($stock / $max * 100)) ?>%"></i>
+                            <em style="left: <?= min(100, round($rp / $max * 100)) ?>%" title="Reorder point"></em>
+                        </div>
+                        <div class="iv-gauge-label"><span>Reorder at <?= $rp ?></span><?php if ($oo): ?><span class="on">+<?= number_format($oo) ?> on order</span><?php endif; ?></div>
+                    </div>
+                    <div class="iv-stats">
+                        <div><span>Value</span><b>₱<?= number_format($stock * (float)$p['price'], 2) ?></b></div>
+                        <div><span>Unit price</span><b>₱<?= number_format((float)$p['price'], 2) ?></b></div>
+                    </div>
+                    <div class="iv-card-foot">
+                        <small><i class="fa-regular fa-clock"></i> <?= $p['last_move'] ? 'Moved ' . date('M j, Y', strtotime($p['last_move'])) : 'No movements yet' ?><?= $p['supplier_name'] ? ' · ' . h($p['supplier_name']) : '' ?></small>
+                        <div class="iv-row-actions">
+                            <a href="stock_in.php?product_id=<?= (int)$p['id'] ?>" class="sx-btn sx-btn-outline sx-btn-sm" title="Stock in" aria-label="Stock in <?= h($p['name']) ?>"><i class="fa-solid fa-plus"></i></a>
+                            <button type="button" class="sx-btn sx-btn-ghost sx-btn-sm" data-qr="<?= h($p['name']) ?>" title="Print QR label" aria-label="Print QR label for <?= h($p['name']) ?>"><i class="fa-solid fa-qrcode"></i></button>
+                            <a href="<?= $historyUrl ?>" class="sx-btn sx-btn-ghost sx-btn-sm" title="History" aria-label="History of <?= h($p['name']) ?>"><i class="fa-solid fa-chevron-right"></i></a>
+                        </div>
+                    </div>
+                </article>
+            <?php endforeach; ?>
         </div>
 
         <div class="ap-pager">
@@ -310,9 +344,9 @@ a.iv-kpi:hover { box-shadow: var(--sx-shadow-md); }
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    // Buong row → product history (maliban kapag pinindot ang button/link sa loob)
-    document.querySelectorAll('.iv-table tr[data-href]').forEach((tr) => tr.addEventListener('click', (e) => {
-        if (!e.target.closest('a, button')) window.location.href = tr.dataset.href;
+    // Buong card → product history (maliban kapag pinindot ang button/link sa loob)
+    document.querySelectorAll('.iv-card[data-href]').forEach((card) => card.addEventListener('click', (e) => {
+        if (!e.target.closest('a, button')) window.location.href = card.dataset.href;
     }));
 
     // QR label: pangalan ng produkto ang laman (ito rin ang hinahanap ng scanner)
