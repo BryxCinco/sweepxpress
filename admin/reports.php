@@ -1,705 +1,295 @@
 <?php
+// admin/reports.php — sales report sa napiling petsa: KPIs, buwanang revenue, top products/customers,
+// retail vs business, at CSV export ng mga order.
 require_once __DIR__ . '/../includes/auth.php';
-
 if (!is_admin()) {
     header("Location: /sweepxpress/login.php");
     exit;
 }
-
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/order_ops.php'; // sx_order_status_pill / sx_order_statuses
 
-$endDate = date("Y-m-d");
-$startDate = date("Y-m-d", strtotime("-6 months"));
-
-function get_status_badge($status) {
-    $status = strtolower($status);
-    return match($status) {
-        'delivered', 'completed' => 'st-delivered',
-        'preparing', 'shipped' => 'st-preparing',
-        'pending' => 'st-pending',
-        'cancelled' => 'st-cancelled',
-        default => 'st-other'
-    };
+// ---------------- Petsa ----------------
+$presets = ['30d' => ['Last 30 days', '-30 days'], '90d' => ['Last 90 days', '-90 days'], '6m' => ['Last 6 months', '-6 months'],
+            '12m' => ['Last 12 months', '-12 months'], 'all' => ['All time', null]];
+$valid = fn($d) => ($t = DateTime::createFromFormat('Y-m-d', (string)$d)) && $t->format('Y-m-d') === $d;
+$range = $_GET['range'] ?? '12m';
+if (isset($_GET['start_date'], $_GET['end_date']) && $valid($_GET['start_date']) && $valid($_GET['end_date']) && $_GET['start_date'] <= $_GET['end_date']) {
+    $range = 'custom';
+    $startDate = $_GET['start_date'];
+    $endDate = $_GET['end_date'];
+} else {
+    if (!isset($presets[$range])) $range = '12m';
+    $endDate = date('Y-m-d');
+    $startDate = $presets[$range][1] ? date('Y-m-d', strtotime($presets[$range][1])) : ($pdo->query("SELECT DATE(MIN(created_at)) FROM orders")->fetchColumn() ?: $endDate);
 }
+$p = ['s' => "{$startDate} 00:00:00", 'e' => "{$endDate} 23:59:59"];
+$inRange = "o.created_at BETWEEN :s AND :e";
 
-if (isset($_GET['start_date'], $_GET['end_date'])) {
-    $newStartDate = $_GET['start_date'];
-    $newEndDate = $_GET['end_date'];
-
-    if (strtotime($newStartDate) && strtotime($newEndDate) && strtotime($newStartDate) <= strtotime($newEndDate)) {
-        $startDate = $newStartDate;
-        $endDate = $newEndDate;
+// ---------------- CSV export (bago ang header) ----------------
+if (($_GET['export'] ?? '') === 'csv') {
+    $rows = $pdo->prepare("
+        SELECT o.id, o.created_at, COALESCE(u.name, o.customer_name, 'Guest') AS customer, u.email, o.order_type, o.status,
+               o.payment_terms, o.total
+        FROM orders o LEFT JOIN users u ON u.id = o.user_id
+        WHERE {$inRange} ORDER BY o.created_at
+    ");
+    $rows->execute($p);
+    header('Content-Type: text/csv; charset=utf-8');
+    header("Content-Disposition: attachment; filename=\"sales_{$startDate}_to_{$endDate}.csv\"");
+    $out = fopen('php://output', 'w');
+    fputs($out, "\xEF\xBB\xBF");
+    fputcsv($out, ['Order ID', 'Date', 'Customer', 'Email', 'Type', 'Status', 'Terms', 'Total']);
+    foreach ($rows as $r) {
+        fputcsv($out, [$r['id'], $r['created_at'], $r['customer'], $r['email'], $r['order_type'], $r['status'], $r['payment_terms'], number_format((float)$r['total'], 2, '.', '')]);
     }
+    exit;
 }
 
-try {
-    $stmt = $pdo->prepare("SELECT IFNULL(SUM(total),0) AS total_sales, COUNT(id) AS total_orders, IFNULL(AVG(total),0) AS avg_order, IFNULL(MAX(total),0) AS max_order FROM orders WHERE created_at BETWEEN :start AND :end");
-    $stmt->execute(['start' => $startDate . ' 00:00:00', 'end' => $endDate . ' 23:59:59']);
-    $salesOverview = $stmt->fetch(PDO::FETCH_ASSOC);
-    
-    $stmt = $pdo->prepare("SELECT COUNT(id) AS new_users FROM users WHERE created_at BETWEEN :start AND :end");
-    $stmt->execute(['start' => $startDate . ' 00:00:00', 'end' => $endDate . ' 23:59:59']);
-    $newUsers = $stmt->fetch(PDO::FETCH_ASSOC)['new_users'];
-    
-    $totalUsers = $pdo->query("SELECT COUNT(id) FROM users")->fetchColumn();
+// ---------------- Data ----------------
+// Revenue = delivered + completed (dati: kasama pati cancelled at pending)
+$kpi = $pdo->prepare("
+    SELECT COUNT(*) AS orders,
+           COALESCE(SUM(CASE WHEN status IN ('delivered','completed') THEN total END), 0) AS revenue,
+           COALESCE(SUM(CASE WHEN status <> 'cancelled' THEN total END), 0) AS booked,
+           COALESCE(AVG(CASE WHEN status <> 'cancelled' THEN total END), 0) AS aov,
+           SUM(status = 'cancelled') AS cancelled,
+           COALESCE(SUM(CASE WHEN status = 'cancelled' THEN total END), 0) AS lost
+    FROM orders o WHERE {$inRange}
+");
+$kpi->execute($p);
+$kpi = $kpi->fetch(PDO::FETCH_ASSOC);
 
-    $stmt = $pdo->prepare("
-        SELECT p.name, SUM(oi.quantity) AS qty_sold, SUM(oi.quantity * oi.price) AS revenue
-        FROM order_items oi
-        JOIN products p ON oi.product_id = p.id
-        JOIN orders o ON oi.order_id = o.id
-        WHERE o.created_at BETWEEN :start AND :end
-        GROUP BY p.id
-        ORDER BY qty_sold DESC
-        LIMIT 5
-    ");
-    $stmt->execute(['start' => $startDate . ' 00:00:00', 'end' => $endDate . ' 23:59:59']);
-    $topProducts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$nu = $pdo->prepare("SELECT COUNT(*) FROM users WHERE created_at BETWEEN :s AND :e");
+$nu->execute($p);
+$newUsers = (int)$nu->fetchColumn();
 
-    $stmt = $pdo->prepare("
-        SELECT u.name, u.email, SUM(o.total) AS spent
-        FROM orders o
-        JOIN users u ON o.user_id = u.id
-        WHERE o.created_at BETWEEN :start AND :end
-        GROUP BY u.id
-        ORDER BY spent DESC
-        LIMIT 5
-    ");
-    $stmt->execute(['start' => $startDate . ' 00:00:00', 'end' => $endDate . ' 23:59:59']);
-    $topCustomers = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    $stmt = $pdo->prepare("
-        SELECT status, COUNT(*) AS count
-        FROM orders
-        WHERE created_at BETWEEN :start AND :end
-        GROUP BY status
-    ");
-    $stmt->execute(['start' => $startDate . ' 00:00:00', 'end' => $endDate . ' 23:59:59']);
-    $orderStatus = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    $stmt = $pdo->prepare("
-        SELECT DATE_FORMAT(created_at, '%Y-%m') AS month, SUM(total) AS monthly_sales
-        FROM orders
-        WHERE created_at BETWEEN :start AND :end
-        GROUP BY month
-        ORDER BY month ASC
-    ");
-    $stmt->execute(['start' => $startDate . ' 00:00:00', 'end' => $endDate . ' 23:59:59']);
-    $monthlySales = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    $detailedSales = $pdo->prepare("
-        SELECT o.id, u.name, o.total, o.status, o.created_at
-        FROM orders o
-        LEFT JOIN users u ON o.user_id = u.id
-        WHERE o.created_at BETWEEN :start AND :end
-        ORDER BY o.created_at DESC
-    ");
-    $detailedSales->execute(['start' => $startDate . ' 00:00:00', 'end' => $endDate . ' 23:59:59']);
-    $salesRows = $detailedSales->fetchAll(PDO::FETCH_ASSOC);
-
-} catch (PDOException $e) {
-    $salesOverview = ['total_sales' => 0, 'total_orders' => 0, 'avg_order' => 0, 'max_order' => 0];
-    $newUsers = 0;
-    $totalUsers = 0;
-    $topProducts = $topCustomers = $orderStatus = $monthlySales = $salesRows = [];
-    echo "<div class='alert alert-danger'>Database Error: " . htmlspecialchars($e->getMessage()) . "</div>";
+// Buwanang revenue + booked, kasama ang buwang walang benta
+$m = $pdo->prepare("
+    SELECT DATE_FORMAT(o.created_at, '%Y-%m') AS ym,
+           SUM(CASE WHEN status IN ('delivered','completed') THEN total ELSE 0 END) AS revenue,
+           SUM(CASE WHEN status <> 'cancelled' THEN total ELSE 0 END) AS booked
+    FROM orders o WHERE {$inRange} GROUP BY ym
+");
+$m->execute($p);
+$monthRows = $m->fetchAll(PDO::FETCH_UNIQUE);
+$monthLabels = $monthRevenue = $monthBooked = [];
+for ($d = new DateTime(substr($startDate, 0, 7) . '-01'), $end = new DateTime(substr($endDate, 0, 7) . '-01'); $d <= $end; $d->modify('+1 month')) {
+    $ym = $d->format('Y-m');
+    $monthLabels[]  = $d->format('M y');
+    $monthRevenue[] = round((float)($monthRows[$ym]['revenue'] ?? 0), 2);
+    $monthBooked[]  = round((float)($monthRows[$ym]['booked'] ?? 0), 2);
 }
+
+$tp = $pdo->prepare("
+    SELECT p.id, COALESCE(p.name, 'Deleted product') AS name, SUM(oi.quantity) AS qty, SUM(oi.quantity * oi.price) AS revenue
+    FROM order_items oi JOIN orders o ON o.id = oi.order_id LEFT JOIN products p ON p.id = oi.product_id
+    WHERE {$inRange} AND o.status <> 'cancelled'
+    GROUP BY oi.product_id, p.id, p.name ORDER BY revenue DESC LIMIT 8
+");
+$tp->execute($p);
+$topProducts = $tp->fetchAll(PDO::FETCH_ASSOC);
+
+$tcStmt = $pdo->prepare("
+    SELECT u.id, u.name, u.email, u.role, COUNT(*) AS orders, SUM(o.total) AS spent
+    FROM orders o JOIN users u ON u.id = o.user_id
+    WHERE {$inRange} AND o.status <> 'cancelled'
+    GROUP BY u.id, u.name, u.email, u.role ORDER BY spent DESC LIMIT 8
+");
+$tcStmt->execute($p);
+$topCustomers = $tcStmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Retail vs business (business = B2B, PO, o business account)
+$sp = $pdo->prepare("
+    SELECT CASE WHEN o.order_type = 'B2B' OR o.status = 'Pending PO' OR COALESCE(u.role, '') = 'business' THEN 'Business' ELSE 'Retail' END AS seg,
+           COUNT(*) AS orders, SUM(o.total) AS booked
+    FROM orders o LEFT JOIN users u ON u.id = o.user_id
+    WHERE {$inRange} AND o.status <> 'cancelled' GROUP BY seg
+");
+$sp->execute($p);
+$segments = $sp->fetchAll(PDO::FETCH_UNIQUE);
+
+$st = $pdo->prepare("SELECT status, COUNT(*) FROM orders o WHERE {$inRange} GROUP BY status ORDER BY 2 DESC");
+$st->execute($p);
+$statusCounts = $st->fetchAll(PDO::FETCH_KEY_PAIR);
+
+$cancelRate = $kpi['orders'] ? $kpi['cancelled'] / $kpi['orders'] * 100 : 0;
+$peso = fn($n, $d = 0) => '₱' . number_format((float)$n, $d);
+$qs = $range === 'custom' ? "start_date={$startDate}&end_date={$endDate}" : "range={$range}";
 
 require_once __DIR__ . '/../includes/header.php';
 ?>
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css">
-<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-<script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-
-body {
-    background: radial-gradient(circle at top,#e0f2fe 0,#f4f5fb 50%,#f9fafb 100%);
-    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-
-.dash-shell {
-    max-width: 1600px;
-    margin: 0 auto;
-    padding: 32px 24px 48px;
-}
-
-/* HEADER */
-.dash-header {
-    margin-bottom: 24px;
-}
-
-.dash-header h1 {
-    font-size: 1.9rem;
-    font-weight: 800;
-    letter-spacing: -0.03em;
-    margin-bottom: 4px;
-}
-
-.dash-header p {
-    font-size: 0.9rem;
-    color: #64748b;
-}
-
-/* DATE FILTER */
-.date-filter-card {
-    background: #ffffff;
-    border-radius: 16px;
-    border: 1px solid #e2e8f0;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.04);
-    padding: 20px;
-    margin-bottom: 24px;
-}
-
-.date-filter-title {
-    font-size: 1rem;
-    font-weight: 700;
-    margin-bottom: 12px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.date-filter-form {
-    display: grid;
-    grid-template-columns: 1fr 1fr auto;
-    gap: 12px;
-    align-items: end;
-}
-
-.date-input {
-    padding: 10px 14px;
-    border-radius: 10px;
-    border: 1px solid #d4dbe8;
-    font-size: 0.9rem;
-    background: #fafbfc;
-    transition: all 0.2s;
-}
-
-.date-input:focus {
-    outline: none;
-    border-color: #2563eb;
-    background: #ffffff;
-    box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
-}
-
-.date-label {
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: #64748b;
-    margin-bottom: 4px;
-}
-
-.filter-btn {
-    padding: 10px 24px;
-    background: linear-gradient(135deg,#2563eb,#1d4ed8);
-    color: white;
-    border: none;
-    border-radius: 10px;
-    font-weight: 600;
-    font-size: 0.9rem;
-    cursor: pointer;
-    transition: all 0.2s;
-    box-shadow: 0 4px 12px rgba(37,99,235,0.3);
-}
-
-.filter-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 20px rgba(37,99,235,0.4);
-}
-
-/* KPI CARDS */
-.kpi-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 16px;
-    margin-bottom: 28px;
-}
-
-.kpi-card {
-    background: linear-gradient(135deg, #ffffff, #f8fafc);
-    border-radius: 16px;
-    border: 1px solid #e2e8f0;
-    padding: 20px;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.04);
-    transition: all 0.2s;
-}
-
-.kpi-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 12px 32px rgba(0,0,0,0.1);
-}
-
-.kpi-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 12px;
-}
-
-.kpi-label {
-    font-size: 0.8rem;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-weight: 700;
-    color: #64748b;
-}
-
-.kpi-icon {
-    width: 40px;
-    height: 40px;
-    border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.2rem;
-}
-
-.kpi-value {
-    font-size: 1.9rem;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-}
-
-.kpi-green { color: #16a34a; }
-.kpi-green .kpi-icon { background: rgba(16,185,129,0.1); color: #10b981; }
-
-.kpi-blue { color: #2563eb; }
-.kpi-blue .kpi-icon { background: rgba(37,99,235,0.1); color: #3b82f6; }
-
-.kpi-amber { color: #f59e0b; }
-.kpi-amber .kpi-icon { background: rgba(245,158,11,0.1); color: #f59e0b; }
-
-.kpi-slate { color: #64748b; }
-.kpi-slate .kpi-icon { background: rgba(100,116,139,0.1); color: #64748b; }
-
-/* CHART SECTION */
-.chart-grid {
-    display: grid;
-    grid-template-columns: 2fr 1fr;
-    gap: 20px;
-    margin-bottom: 28px;
-}
-
-.chart-card {
-    background: #ffffff;
-    border-radius: 16px;
-    border: 1px solid #e2e8f0;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.06);
-    padding: 24px;
-}
-
-.chart-title {
-    font-size: 1.1rem;
-    font-weight: 700;
-    margin-bottom: 6px;
-}
-
-.chart-subtitle {
-    font-size: 0.85rem;
-    color: #64748b;
-    margin-bottom: 20px;
-}
-
-canvas {
-    max-height: 320px;
-}
-
-/* TABLE SECTION */
-.table-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 20px;
-    margin-bottom: 28px;
-}
-
-.table-card {
-    background: #ffffff;
-    border-radius: 16px;
-    border: 1px solid #e2e8f0;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.06);
-    padding: 24px;
-}
-
-.table-card-title {
-    font-size: 1.1rem;
-    font-weight: 700;
-    margin-bottom: 6px;
-}
-
-.table-card-subtitle {
-    font-size: 0.85rem;
-    color: #64748b;
-    margin-bottom: 16px;
-}
-
-.data-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.9rem;
-}
-
-.data-table thead th {
-    padding: 10px 12px;
-    background: #f9fafb;
-    border-bottom: 1px solid #e2e8f0;
-    font-size: 0.78rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: #9ca3af;
-    text-align: left;
-}
-
-.data-table tbody td {
-    padding: 12px;
-    border-bottom: 1px solid #e5e7eb;
-}
-
-.data-table tbody tr:hover {
-    background: #f8f9fa;
-}
-
-/* STATUS BADGES */
-.status-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    border-radius: 999px;
-    font-size: 0.78rem;
-    font-weight: 600;
-}
-
-.status-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-}
-
-.st-delivered {
-    background: rgba(16,185,129,0.1);
-    color: #047857;
-}
-.st-delivered .status-dot { background: #10b981; }
-
-.st-preparing {
-    background: rgba(59,130,246,0.1);
-    color: #1d4ed8;
-}
-.st-preparing .status-dot { background: #3b82f6; }
-
-.st-pending {
-    background: rgba(245,158,11,0.1);
-    color: #b45309;
-}
-.st-pending .status-dot { background: #f59e0b; }
-
-.st-cancelled {
-    background: rgba(239,68,68,0.1);
-    color: #b91c1c;
-}
-.st-cancelled .status-dot { background: #ef4444; }
-
-.st-other {
-    background: rgba(148,163,184,0.1);
-    color: #475569;
-}
-
-/* DETAILED TABLE */
-.detailed-card {
-    background: #ffffff;
-    border-radius: 16px;
-    border: 1px solid #e2e8f0;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.06);
-    padding: 24px;
-}
-
-@media (max-width: 1100px) {
-    .chart-grid,
-    .table-grid {
-        grid-template-columns: 1fr;
-    }
-}
-
-@media (max-width: 768px) {
-    .dash-shell {
-        padding: 24px 16px;
-    }
-    
-    .date-filter-form {
-        grid-template-columns: 1fr;
-    }
+/* ============================================================
+   REPORTS (Phase 9g) — tokens + sx-card / sx-table / sx-chip mula sa assets/style.css
+   ============================================================ */
+.rp { max-width: 1440px; padding-block: var(--sx-space-5) var(--sx-space-8); }
+.rp-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--sx-space-3); margin-bottom: var(--sx-space-4); }
+.rp-head p { margin: var(--sx-space-2) 0 0; color: var(--sx-muted); }
+.rp-range { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sx-space-3); margin-bottom: var(--sx-space-5); padding: var(--sx-space-3) var(--sx-space-4); }
+.rp-range nav { display: flex; flex-wrap: wrap; gap: var(--sx-space-2); }
+.rp-range form { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sx-space-2); }
+.rp-range .sx-input { width: auto; }
+.rp-kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sx-space-3); margin-bottom: var(--sx-space-4); }
+.rp-kpi { padding: var(--sx-space-4); }
+.rp-kpi span { display: block; font-size: var(--sx-text-xs); font-weight: var(--sx-weight-semibold); color: var(--sx-muted); }
+.rp-kpi strong { display: block; margin-top: 4px; font-size: clamp(1.2rem, 1rem + 0.8vw, 1.6rem); font-weight: var(--sx-weight-extrabold); color: var(--sx-dark); }
+.rp-kpi small { display: block; margin-top: 2px; font-size: var(--sx-text-xs); color: var(--sx-muted); }
+.rp-grid { display: grid; gap: var(--sx-space-4); margin-bottom: var(--sx-space-4); }
+.rp-panel h2 { margin: 0 0 4px; font-size: var(--sx-text-base); font-weight: var(--sx-weight-extrabold); color: var(--sx-dark); }
+.rp-panel > p { margin: 0 0 var(--sx-space-4); font-size: var(--sx-text-xs); color: var(--sx-muted); }
+.rp-chart { position: relative; height: 280px; }
+.rp-table .num { text-align: right; white-space: nowrap; }
+.rp-table a { color: var(--sx-dark); font-weight: var(--sx-weight-semibold); text-decoration: none; }
+.rp-table a:hover { color: var(--sx-primary); }
+.rp-bar { height: 6px; margin-top: 4px; border-radius: var(--sx-radius-pill); background: var(--sx-primary-soft); overflow: hidden; }
+.rp-bar i { display: block; height: 100%; background: var(--sx-primary); }
+.rp-split { display: grid; gap: var(--sx-space-3); }
+.rp-split div { display: flex; justify-content: space-between; font-size: var(--sx-text-sm); }
+.rp-status { display: flex; flex-wrap: wrap; gap: var(--sx-space-2); }
+.rp-status span { display: inline-flex; align-items: center; gap: 6px; font-size: var(--sx-text-sm); }
+@media (min-width: 768px) { .rp-kpis { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 1200px) {
+    .rp-kpis { grid-template-columns: repeat(6, 1fr); }
+    .rp-grid.main { grid-template-columns: 2fr 1fr; }
+    .rp-grid.two { grid-template-columns: 1fr 1fr; }
 }
 </style>
 
-<div class="dash-shell">
-    <!-- HEADER -->
-    <div class="dash-header">
-        <h1>Marketing & Sales Dashboard</h1>
-        <p>Track performance, revenue trends, and customer insights.</p>
+<div class="rp sx-container">
+    <div class="rp-head">
+        <div>
+            <span class="sx-eyebrow">Insights</span>
+            <h1 class="sx-heading-lg">Sales report</h1>
+            <p><?= date('M j, Y', strtotime($startDate)) ?> – <?= date('M j, Y', strtotime($endDate)) ?></p>
+        </div>
+        <a href="reports.php?<?= h($qs) ?>&export=csv" class="sx-btn sx-btn-primary sx-btn-sm"><i class="fa-solid fa-file-csv"></i> Export orders (CSV)</a>
     </div>
 
-    <!-- DATE FILTER -->
-    <div class="date-filter-card">
-        <div class="date-filter-title">
-            <i class="fas fa-calendar-alt"></i>
-            Report Date Range
-        </div>
-        <form method="GET" class="date-filter-form">
-            <div>
-                <div class="date-label">Start Date</div>
-                <input type="date" name="start_date" value="<?php echo htmlspecialchars($startDate); ?>" class="date-input" required>
-            </div>
-            <div>
-                <div class="date-label">End Date</div>
-                <input type="date" name="end_date" value="<?php echo htmlspecialchars($endDate); ?>" class="date-input" required>
-            </div>
-            <button type="submit" class="filter-btn">
-                <i class="fas fa-filter"></i>
-                Apply Filter
-            </button>
+    <div class="sx-card rp-range">
+        <nav aria-label="Date range">
+            <?php foreach ($presets as $k => [$label]): ?>
+                <a href="reports.php?range=<?= $k ?>" class="sx-chip<?= $range === $k ? ' active' : '' ?>"><?= $label ?></a>
+            <?php endforeach; ?>
+        </nav>
+        <form method="get">
+            <input type="date" name="start_date" class="sx-input" value="<?= h($startDate) ?>" aria-label="Start date">
+            <span class="sx-hint">to</span>
+            <input type="date" name="end_date" class="sx-input" value="<?= h($endDate) ?>" max="<?= date('Y-m-d') ?>" aria-label="End date">
+            <button type="submit" class="sx-btn sx-btn-dark sx-btn-sm">Apply</button>
         </form>
     </div>
 
-    <!-- KPI CARDS -->
-    <div class="kpi-grid">
-        <div class="kpi-card kpi-green">
-            <div class="kpi-header">
-                <div class="kpi-label">Total Sales</div>
-                <div class="kpi-icon">
-                    <i class="fas fa-dollar-sign"></i>
-                </div>
-            </div>
-            <div class="kpi-value">₱<?php echo number_format($salesOverview['total_sales'], 2); ?></div>
-        </div>
-
-        <div class="kpi-card kpi-blue">
-            <div class="kpi-header">
-                <div class="kpi-label">Total Orders</div>
-                <div class="kpi-icon">
-                    <i class="fas fa-shopping-cart"></i>
-                </div>
-            </div>
-            <div class="kpi-value"><?php echo number_format($salesOverview['total_orders']); ?></div>
-        </div>
-
-        <div class="kpi-card kpi-amber">
-            <div class="kpi-header">
-                <div class="kpi-label">New Customers</div>
-                <div class="kpi-icon">
-                    <i class="fas fa-user-plus"></i>
-                </div>
-            </div>
-            <div class="kpi-value"><?php echo number_format($newUsers); ?></div>
-        </div>
-
-        <div class="kpi-card kpi-slate">
-            <div class="kpi-header">
-                <div class="kpi-label">Total Users</div>
-                <div class="kpi-icon">
-                    <i class="fas fa-users"></i>
-                </div>
-            </div>
-            <div class="kpi-value"><?php echo number_format($totalUsers); ?></div>
-        </div>
+    <div class="rp-kpis">
+        <div class="sx-card rp-kpi"><span>Revenue</span><strong><?= $peso($kpi['revenue']) ?></strong><small>Delivered &amp; completed</small></div>
+        <div class="sx-card rp-kpi"><span>Booked</span><strong><?= $peso($kpi['booked']) ?></strong><small>All except cancelled</small></div>
+        <div class="sx-card rp-kpi"><span>Orders</span><strong><?= number_format((int)$kpi['orders']) ?></strong><small><?= (int)$kpi['cancelled'] ?> cancelled</small></div>
+        <div class="sx-card rp-kpi"><span>Avg order</span><strong><?= $peso($kpi['aov'], 2) ?></strong><small>Excludes cancelled</small></div>
+        <div class="sx-card rp-kpi"><span>Cancellation rate</span><strong><?= number_format($cancelRate, 1) ?>%</strong><small><?= $peso($kpi['lost']) ?> lost</small></div>
+        <div class="sx-card rp-kpi"><span>New accounts</span><strong><?= $newUsers ?></strong><small>Signed up in range</small></div>
     </div>
 
-    <!-- CHART SECTION -->
-    <div class="chart-grid">
-        <div class="chart-card">
-            <div class="chart-title">Revenue Trend</div>
-            <div class="chart-subtitle">Monthly sales performance over the selected period.</div>
-            <canvas id="monthlySalesChart"></canvas>
-        </div>
+    <div class="rp-grid main">
+        <section class="sx-card rp-panel">
+            <h2>Revenue by month</h2>
+            <p>Revenue counts delivered and completed orders; booked includes everything not cancelled.</p>
+            <div class="rp-chart"><canvas id="monthChart" role="img" aria-label="Revenue and booked sales by month"></canvas></div>
+        </section>
+        <section class="sx-card rp-panel">
+            <h2>Retail vs business</h2>
+            <p>Booked value, excluding cancelled orders.</p>
+            <?php $segTotal = array_sum(array_column($segments, 'booked')) ?: 1; ?>
+            <div class="rp-split">
+                <?php foreach (['Retail', 'Business'] as $seg): $v = (float)($segments[$seg]['booked'] ?? 0); ?>
+                    <div>
+                        <span><strong><?= $seg ?></strong> · <?= (int)($segments[$seg]['orders'] ?? 0) ?> orders</span>
+                        <span><?= $peso($v) ?> · <?= number_format($v / $segTotal * 100) ?>%</span>
+                    </div>
+                    <div class="rp-bar" style="margin-top: -6px"><i style="width: <?= round($v / $segTotal * 100, 1) ?>%"></i></div>
+                <?php endforeach; ?>
+            </div>
+            <h2 style="margin-top: var(--sx-space-5)">Orders by status</h2>
+            <p>All orders placed in range.</p>
+            <div class="rp-status">
+                <?php foreach ($statusCounts as $s => $n): ?>
+                    <span><?= sx_order_status_pill($s) ?> <?= (int)$n ?></span>
+                <?php endforeach; ?>
+                <?php if (!$statusCounts): ?><span class="sx-hint">No orders in this range.</span><?php endif; ?>
+            </div>
+        </section>
+    </div>
 
-        <div class="chart-card">
-            <div class="chart-title">Order Funnel</div>
-            <div class="chart-subtitle">Breakdown by current order status.</div>
-            <div class="table-responsive">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Status</th>
-                            <th style="text-align:right;">Count</th>
-                        </tr>
-                    </thead>
+    <div class="rp-grid two">
+        <section class="sx-card rp-panel">
+            <h2>Top products</h2>
+            <p>By booked revenue.</p>
+            <?php $maxRev = max(array_column($topProducts, 'revenue') ?: [1]); ?>
+            <div class="sx-table-wrap" style="border: 0">
+                <table class="sx-table rp-table">
+                    <thead><tr><th>Product</th><th class="num">Units</th><th class="num">Revenue</th></tr></thead>
                     <tbody>
-                        <?php foreach ($orderStatus as $row): ?>
+                        <?php foreach ($topProducts as $tpRow): ?>
                             <tr>
                                 <td>
-                                    <span class="status-pill <?php echo get_status_badge($row['status']); ?>">
-                                        <span class="status-dot"></span>
-                                        <?php echo htmlspecialchars(ucfirst($row['status'])); ?>
-                                    </span>
+                                    <?php if ($tpRow['id']): ?><a href="product_history.php?product_id=<?= (int)$tpRow['id'] ?>"><?= h($tpRow['name']) ?></a><?php else: ?><?= h($tpRow['name']) ?><?php endif; ?>
+                                    <div class="rp-bar"><i style="width: <?= round($tpRow['revenue'] / $maxRev * 100, 1) ?>%"></i></div>
                                 </td>
-                                <td style="text-align:right;font-weight:700;"><?php echo $row['count']; ?></td>
+                                <td class="num"><?= number_format((int)$tpRow['qty']) ?></td>
+                                <td class="num"><?= $peso($tpRow['revenue']) ?></td>
                             </tr>
                         <?php endforeach; ?>
-                        <?php if (!$orderStatus): ?>
-                            <tr><td colspan="2" style="text-align:center;color:#9ca3af;">No orders found.</td></tr>
-                        <?php endif; ?>
+                        <?php if (!$topProducts): ?><tr><td colspan="3" class="sx-hint">No sales in this range.</td></tr><?php endif; ?>
                     </tbody>
                 </table>
             </div>
-        </div>
-    </div>
-
-    <!-- TABLES SECTION -->
-    <div class="table-grid">
-        <div class="table-card">
-            <div class="table-card-title">Top 5 Products</div>
-            <div class="table-card-subtitle">Best-selling products by quantity sold.</div>
-            <div class="table-responsive">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Product</th>
-                            <th style="text-align:center;">Qty Sold</th>
-                            <th style="text-align:right;">Revenue</th>
-                        </tr>
-                    </thead>
+        </section>
+        <section class="sx-card rp-panel">
+            <h2>Top customers</h2>
+            <p>By booked value.</p>
+            <div class="sx-table-wrap" style="border: 0">
+                <table class="sx-table rp-table">
+                    <thead><tr><th>Customer</th><th class="num">Orders</th><th class="num">Booked</th></tr></thead>
                     <tbody>
-                        <?php foreach ($topProducts as $row): ?>
+                        <?php foreach ($topCustomers as $c): ?>
                             <tr>
-                                <td style="font-weight:600;"><?php echo htmlspecialchars($row['name']); ?></td>
-                                <td style="text-align:center;font-weight:700;"><?php echo $row['qty_sold']; ?></td>
-                                <td style="text-align:right;font-weight:700;color:#16a34a;">₱<?php echo number_format($row['revenue'], 2); ?></td>
+                                <td><a href="user_actions.php?id=<?= (int)$c['id'] ?>"><?= h($c['name']) ?></a><?= $c['role'] === 'business' ? ' <span class="sx-hint">· business</span>' : '' ?></td>
+                                <td class="num"><?= (int)$c['orders'] ?></td>
+                                <td class="num"><?= $peso($c['spent']) ?></td>
                             </tr>
                         <?php endforeach; ?>
-                        <?php if (!$topProducts): ?>
-                            <tr><td colspan="3" style="text-align:center;color:#9ca3af;">No product data available.</td></tr>
-                        <?php endif; ?>
+                        <?php if (!$topCustomers): ?><tr><td colspan="3" class="sx-hint">No customers in this range.</td></tr><?php endif; ?>
                     </tbody>
                 </table>
             </div>
-        </div>
-
-        <div class="table-card">
-            <div class="table-card-title">High-Value Customers</div>
-            <div class="table-card-subtitle">Top 5 customers by total spending.</div>
-            <div class="table-responsive">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Email</th>
-                            <th style="text-align:right;">Spent</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($topCustomers as $row): ?>
-                            <tr>
-                                <td style="font-weight:600;"><?php echo htmlspecialchars($row['name']); ?></td>
-                                <td><?php echo htmlspecialchars($row['email']); ?></td>
-                                <td style="text-align:right;font-weight:700;color:#f59e0b;">₱<?php echo number_format($row['spent'], 2); ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                        <?php if (!$topCustomers): ?>
-                            <tr><td colspan="3" style="text-align:center;color:#9ca3af;">No customer data available.</td></tr>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <!-- DETAILED SALES TABLE -->
-    <div class="detailed-card">
-        <div class="chart-title">Detailed Sales Deep Dive</div>
-        <div class="chart-subtitle">Interactive table of all orders within the selected date range.</div>
-        <div class="table-responsive">
-            <table id="salesTable" class="data-table">
-                <thead>
-                    <tr>
-                        <th>Order ID</th>
-                        <th>Customer</th>
-                        <th>Total</th>
-                        <th>Status</th>
-                        <th>Date</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($salesRows as $row): ?>
-                        <tr>
-                            <td style="font-weight:600;">#<?php echo htmlspecialchars($row['id']); ?></td>
-                            <td><?php echo htmlspecialchars($row['name'] ?? 'N/A'); ?></td>
-                            <td style="font-weight:700;color:#16a34a;">₱<?php echo number_format($row['total'], 2); ?></td>
-                            <td>
-                                <span class="status-pill <?php echo get_status_badge($row['status']); ?>">
-                                    <span class="status-dot"></span>
-                                    <?php echo ucfirst(htmlspecialchars($row['status'])); ?>
-                                </span>
-                            </td>
-                            <td><?php echo date("M d, Y", strtotime($row['created_at'])); ?></td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
+        </section>
     </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
-const monthlySalesData = {
-    labels: <?php echo json_encode(array_map(fn($m) => date("M Y", strtotime($m)), array_column($monthlySales, 'month'))); ?>,
-    datasets: [{
-        label: 'Monthly Sales (₱)',
-        data: <?php echo json_encode(array_column($monthlySales, 'monthly_sales')); ?>,
-        borderColor: '#2563eb',
-        backgroundColor: 'rgba(37,99,235,0.08)',
-        pointBackgroundColor: '#2563eb',
-        pointBorderColor: '#fff',
-        pointHoverBackgroundColor: '#fff',
-        pointHoverBorderColor: '#2563eb',
-        fill: true,
-        tension: 0.4,
-        borderWidth: 3
-    }]
-};
-
-const config = {
-    type: 'line',
-    data: monthlySalesData,
-    options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-            legend: { display: false },
-            tooltip: {
-                callbacks: {
-                    label: function(context) {
-                        return '₱' + context.parsed.y.toLocaleString('en-US', {minimumFractionDigits: 2});
-                    }
-                }
-            }
+document.addEventListener('DOMContentLoaded', function () {
+    if (typeof Chart === 'undefined') return;
+    const css = getComputedStyle(document.documentElement);
+    const tok = (n) => css.getPropertyValue(n).trim();
+    Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+    Chart.defaults.color = tok('--sx-muted');
+    Chart.defaults.plugins.legend.labels.usePointStyle = true;
+    const peso = (v) => '₱' + Number(v).toLocaleString('en-PH');
+    new Chart(document.getElementById('monthChart'), {
+        type: 'bar',
+        data: {
+            labels: <?= json_encode($monthLabels) ?>,
+            datasets: [
+                { label: 'Revenue', data: <?= json_encode($monthRevenue) ?>, backgroundColor: tok('--sx-primary'), borderRadius: 6, maxBarThickness: 28 },
+                { label: 'Booked', data: <?= json_encode($monthBooked) ?>, backgroundColor: tok('--sx-accent'), borderRadius: 6, maxBarThickness: 28 },
+            ],
         },
-        scales: {
-            y: {
-                beginAtZero: true,
-                grid: { color: 'rgba(0,0,0,0.04)' },
-                ticks: {
-                    callback: function(value) {
-                        return '₱' + value.toLocaleString();
-                    }
-                }
-            },
-            x: { grid: { display: false } }
-        }
-    }
-};
-
-document.addEventListener('DOMContentLoaded', function() {
-    const ctx = document.getElementById('monthlySalesChart');
-    if (ctx) new Chart(ctx, config);
-   
-    $('#salesTable').DataTable({
-        responsive: true,
-        pageLength: 10,
-        order: [[4, "desc"]]
+        options: {
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'top', align: 'end' }, tooltip: { callbacks: { label: (c) => c.dataset.label + ': ' + peso(c.parsed.y) } } },
+            scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: { color: tok('--sx-border-light') }, ticks: { callback: (v) => peso(v) } } },
+        },
     });
 });
 </script>

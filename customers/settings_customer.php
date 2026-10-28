@@ -1,5 +1,6 @@
 <?php
-// customers/settings_customer.php — profile at password ng customer / business account
+// customers/settings_customer.php — profile at password ng customer / business account.
+// Ginagamit din ng admin/settings_admin.php (iisang settings page para sa lahat ng role).
 
 if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/../config.php';
@@ -28,6 +29,7 @@ $_SESSION['user'] = array_merge($_SESSION['user'], $dbUser);
 $user = $_SESSION['user'];
 
 $tab    = ($_GET['tab'] ?? '') === 'security' ? 'security' : 'profile';
+$self   = str_starts_with($_SERVER['SCRIPT_NAME'] ?? '', '/sweepxpress/admin/') ? '/sweepxpress/admin/settings_admin.php' : '/sweepxpress/customers/settings_customer.php';
 $errors = [];   // mga mensahe ng validation para sa kasalukuyang form
 $old    = [];   // mga tinype ng user kapag may error, para hindi mawala
 
@@ -116,7 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
 
                 $_SESSION['sx_flash'] = ['success', 'Profile updated.'];
-                header('Location: /sweepxpress/customers/settings_customer.php');
+                header('Location: ' . $self);
                 exit;
             } catch (PDOException $e) {
                 if (str_contains($e->getMessage(), 'Duplicate entry')) {
@@ -153,7 +155,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->prepare("UPDATE users SET password_hash = ? WHERE id = ?")
                 ->execute([password_hash($newpass, PASSWORD_DEFAULT), $userId]);
             $_SESSION['sx_flash'] = ['success', 'Password updated.'];
-            header('Location: /sweepxpress/customers/settings_customer.php?tab=security');
+            header('Location: ' . $self . '?tab=security');
             exit;
         }
     }
@@ -252,8 +254,13 @@ require_once __DIR__ . '/../includes/header.php';
                 <a href="?tab=security" class="<?= $tab === 'security' ? 'active' : '' ?>"><i class="fa-solid fa-lock"></i> Password</a>
             </nav>
             <div class="st-links">
-                <a href="/sweepxpress/customers/my_orders.php"><i class="fa-solid fa-receipt"></i> My Orders</a>
-                <a href="/sweepxpress/cart.php"><i class="fa-solid fa-cart-shopping"></i> Cart</a>
+                <?php if (($user['role'] ?? '') === 'admin'): ?>
+                    <a href="/sweepxpress/admin/dashboard.php"><i class="fa-solid fa-gauge-high"></i> Dashboard</a>
+                    <a href="/sweepxpress/admin/view_logs.php?user_id=<?= (int)$userId ?>"><i class="fa-solid fa-clock-rotate-left"></i> My activity</a>
+                <?php else: ?>
+                    <a href="/sweepxpress/customers/my_orders.php"><i class="fa-solid fa-receipt"></i> My Orders</a>
+                    <a href="/sweepxpress/cart.php"><i class="fa-solid fa-cart-shopping"></i> Cart</a>
+                <?php endif; ?>
             </div>
         </aside>
 

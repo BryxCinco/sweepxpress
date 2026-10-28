@@ -1,649 +1,207 @@
 <?php
-// ... (Your existing PHP code remains the same)
-
+// admin/customer_management.php — lahat ng account (customer, business, admin), may filter at bilang ng order
+if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../config.php';
-require_once __DIR__ . '/../includes/log_helper.php';
-
 if (!is_admin()) {
     header("Location: /sweepxpress/login.php");
     exit;
 }
+require_once __DIR__ . '/../includes/admin_products.php'; // sx_flash
+
+$roles    = ['all' => 'All roles', 'customer' => 'Customers', 'business' => 'Business', 'admin' => 'Admins'];
+$statuses = ['all' => 'Any status', 'active' => 'Active', 'inactive' => 'Inactive 30d+', 'suspended' => 'Suspended'];
+$role   = isset($roles[$_GET['role'] ?? '']) ? $_GET['role'] : 'all';
+$status = isset($statuses[$_GET['status'] ?? '']) ? $_GET['status'] : 'all';
+$search = trim($_GET['q'] ?? '');
+$limit  = 20;
+$page   = max(1, (int)($_GET['page'] ?? 1));
+
+// Huling login mula sa user_logs; suspended kapag suspended_until ay nasa hinaharap
+$base = "
+    SELECT u.id, u.name, u.email, u.role, u.created_at, u.suspended_until, u.profile_image,
+           (SELECT MAX(created_at) FROM user_logs WHERE user_id = u.id AND action_type = 'LOGIN_SUCCESS') AS last_login_at,
+           (SELECT COUNT(*) FROM orders WHERE user_id = u.id) AS orders,
+           (SELECT COALESCE(SUM(total), 0) FROM orders WHERE user_id = u.id AND status IN ('delivered', 'completed')) AS spent
+    FROM users u
+";
+$where = [];
+$params = [];
+if ($role !== 'all') { $where[] = 'u.role = ?'; $params[] = $role; }
+if ($search !== '') {
+    $where[] = '(u.name LIKE ? OR u.email LIKE ? OR u.username LIKE ?)';
+    array_push($params, "%{$search}%", "%{$search}%", "%{$search}%");
+}
+$having = match ($status) {
+    'suspended' => 'HAVING suspended_until > NOW()',
+    'inactive'  => 'HAVING (suspended_until IS NULL OR suspended_until <= NOW()) AND (last_login_at IS NULL OR last_login_at < NOW() - INTERVAL 30 DAY)',
+    'active'    => 'HAVING (suspended_until IS NULL OR suspended_until <= NOW()) AND last_login_at >= NOW() - INTERVAL 30 DAY',
+    default     => '',
+};
+$sql = $base . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . " {$having}";
+
+$count = $pdo->prepare("SELECT COUNT(*) FROM ({$sql}) t");
+$count->execute($params);
+$total = (int)$count->fetchColumn();
+$totalPages = max(1, (int)ceil($total / $limit));
+$page = min($page, $totalPages);
+$offset = ($page - 1) * $limit;
+
+$stmt = $pdo->prepare("{$sql} ORDER BY u.created_at DESC LIMIT {$limit} OFFSET {$offset}");
+$stmt->execute($params);
+$users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$roleCounts = $pdo->query("SELECT role, COUNT(*) FROM users GROUP BY role")->fetchAll(PDO::FETCH_KEY_PAIR);
+$flash = sx_flash();
+
+$url = function (array $changes = []) use ($role, $status, $search, $page) {
+    $q = array_filter(array_merge(['role' => $role === 'all' ? null : $role, 'status' => $status === 'all' ? null : $status,
+        'q' => $search, 'page' => $page > 1 ? $page : null], $changes), fn($v) => $v !== null && $v !== '');
+    return 'customer_management.php' . ($q ? '?' . http_build_query($q) : '');
+};
+
+// Status ng account para sa badge
+function sx_account_state(array $u): array
+{
+    if (!empty($u['suspended_until']) && strtotime($u['suspended_until']) > time()) return ['Suspended', 'cancelled'];
+    if (!$u['last_login_at'] || strtotime($u['last_login_at']) < strtotime('-30 days')) return ['Inactive', 'pending'];
+    return ['Active', 'delivered'];
+}
+$roleLabels = ['admin' => 'Admin', 'business' => 'Business', 'customer' => 'Customer'];
+$defaultAvatar = '/sweepxpress/assets/profile-icon.jpg';
+
 require_once __DIR__ . '/../includes/header.php';
-
-// Role badge styles
-function get_role_badge_class($role) {
-    return match ($role) {
-        'admin'     => 'role-admin',
-        'customer'  => 'role-customer',
-        'business'  => 'role-business',
-        default     => 'role-other',
-    };
-}
-
-function get_user_status($suspendedUntil, $lastLoginAt) {
-    $now            = new DateTime();
-    $status         = 'Active';
-    $badgeClass     = 'st-active';
-
-    if (!empty($suspendedUntil)) {
-        $suspensionExpiry = new DateTime($suspendedUntil);
-        if ($now < $suspensionExpiry) {
-            return ['status' => 'Suspended', 'class' => 'st-suspended'];
-        }
-    }
-
-    $inactivityThreshold = new DateTime('-30 days');
-
-    if ($lastLoginAt) {
-        $lastLogin = new DateTime($lastLoginAt);
-        if ($lastLogin < $inactivityThreshold) {
-            $status     = 'Inactive';
-            $badgeClass = 'st-inactive';
-        }
-    } else {
-        $status     = 'Inactive';
-        $badgeClass = 'st-inactive';
-    }
-
-    return ['status' => $status, 'class' => $badgeClass];
-}
-
-try {
-    // NOTE: $pdo is assumed to be available from config.php
-    // In a real scenario, you must ensure $pdo is properly instantiated and connected.
-    $stmt = $pdo->query("
-        SELECT 
-            u.id,
-            u.name,
-            u.email,
-            u.role,
-            u.created_at,
-            u.suspended_until,
-            u.profile_image,  /* <--- ADDED: Fetch the profile image column */
-            (
-                SELECT MAX(ul.created_at)
-                FROM user_logs ul
-                WHERE ul.user_id = u.id
-                  AND ul.action_type = 'LOGIN_SUCCESS'
-            ) AS last_login_at
-        FROM users u
-        ORDER BY u.created_at DESC
-    ");
-    $customers = $stmt->fetchAll(PDO::FETCH_ASSOC);
-} catch (PDOException $e) {
-    // ... (Your existing error handling remains the same)
-    die(
-        "<div class='container p-5'>
-            <div class='alert alert-danger'>
-                Database error: Could not fetch users. " . htmlspecialchars($e->getMessage()) . "
-            </div>
-        </div>"
-    );
-}
 ?>
 
-<link rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-
-body {
-    background: radial-gradient(circle at top,#e0f2fe 0,#f4f5fb 50%,#f9fafb 100%);
-    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-
-/* SHELL */
-.user-shell {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 32px 24px 40px;
-}
-
-/* HEADER BAR */
-.user-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    gap: 18px;
-    margin-bottom: 20px;
-    flex-wrap: wrap;
-}
-
-.user-title-block h1 {
-    font-size: 1.9rem;
-    font-weight: 800;
-    letter-spacing: -0.03em;
-    margin-bottom: 4px;
-}
-
-.user-title-block p {
-    font-size: 0.9rem;
-    color: #64748b;
-}
-
-.user-search-wrap {
-    max-width: 320px;
-    width: 100%;
-}
-
-.user-search-input {
-    width: 100%;
-    padding: 10px 14px 10px 38px;
-    border-radius: 999px;
-    border: 1px solid #d4dbe8;
-    background: #ffffff;
-    font-size: 0.9rem;
-    transition: all 0.2s ease;
-}
-
-.user-search-input:focus {
-    outline: none;
-    border-color: #2563eb;
-    box-shadow: 0 0 0 3px rgba(37,99,235,0.15);
-}
-
-.user-search-icon {
-    position: absolute;
-    left: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #9ca3af;
-}
-
-/* STATS STRIP */
-.user-stats {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 18px;
-    flex-wrap: wrap;
-}
-
-.user-stat-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 12px;
-    border-radius: 999px;
-    border: 1px solid #e2e8f0;
-    background: #ffffff;
-    font-size: 0.8rem;
-    color: #475569;
-}
-
-/* CARD TABLE */
-.user-card {
-    background: #ffffff;
-    border-radius: 16px;
-    border: 1px solid #e2e8f0;
-    box-shadow: 0 10px 30px rgba(15,23,42,0.08);
-    overflow: hidden;
-}
-
-.user-card-header {
-    padding: 14px 20px;
-    border-bottom: 1px solid #e2e8f0;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.user-card-header h5 {
-    margin: 0;
-    font-size: 1.02rem;
-    font-weight: 700;
-}
-
-.user-card-sub {
-    font-size: 0.8rem;
-    color: #6b7280;
-}
-
-/* TABLE */
-.user-table-wrap {
-    overflow-x: auto;
-}
-
-.user-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.9rem;
-}
-
-.user-table thead th {
-    padding: 10px 16px;
-    background: #f9fafb;
-    border-bottom: 1px solid #e2e8f0;
-    font-size: 0.78rem;
-    text-transform: uppercase;
-    letter-spacing: 0.09em;
-    color: #9ca3af;
-    text-align: left;
-}
-
-.user-table tbody td {
-    padding: 12px 16px;
-    border-bottom: 1px solid #e5e7eb;
-    vertical-align: middle;
-}
-
-.user-table tbody tr:last-child td {
-    border-bottom: none;
-}
-
-.user-table tbody tr {
-    transition: background 0.16s ease;
-}
-
-.user-table tbody tr:hover {
-    background: #f1f5f9;
-}
-
-/* CELL STYLES */
-.cell-id {
-    font-weight: 600;
-    color: #9ca3af;
-}
-
-.cell-name {
-    font-weight: 600;
-    color: #111827;
-}
-
-.cell-email a {
-    color: #111827;
-    text-decoration: none;
-}
-
-.cell-email a:hover {
-    text-decoration: underline;
-}
-
-/* ROLE BADGES */
-.role-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 10px;
-    border-radius: 999px;
-    font-size: 0.8rem;
-    font-weight: 600;
-}
-
-.role-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-}
-
-.role-admin {
-    background: rgba(239,68,68,0.08);
-    color: #b91c1c;
-}
-.role-admin .role-dot { background:#ef4444; }
-
-.role-customer {
-    background: rgba(59,130,246,0.08);
-    color: #1d4ed8;
-}
-.role-customer .role-dot { background:#3b82f6; }
-
-.role-business {
-    background: rgba(16,185,129,0.08);
-    color: #047857;
-}
-.role-business .role-dot { background:#10b981; }
-
-.role-other {
-    background: rgba(148,163,184,0.15);
-    color: #374151;
-}
-.role-other .role-dot { background:#6b7280; }
-
-/* STATUS BADGES */
-.status-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 11px;
-    border-radius: 999px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: #ffffff;
-}
-
-.st-active {
-    background:#16a34a;
-}
-.st-inactive {
-    background:#facc15;
-    color:#854d0e;
-}
-.st-suspended {
-    background:#ef4444;
-}
-
-/* MANAGE BUTTON */
-.manage-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 7px 12px;
-    border-radius: 999px;
-    border: 1px solid #e2e8f0;
-    background:#ffffff;
-    color:#2563eb;
-    font-size:0.82rem;
-    font-weight:600;
-    text-decoration:none;
-    transition:all 0.18s;
-}
-
-.manage-btn:hover {
-    background:#2563eb;
-    color:#ffffff;
-}
-
-/* SEARCH ICON WRAP */
-.search-wrap {
-    position: relative;
-    width: 100%;
-}
-
-@media (max-width: 768px) {
-    .user-shell {
-        padding: 24px 16px 32px;
-    }
-    .user-header {
-        align-items: flex-start;
-    }
-    
-    /* ----------------------------------- */
-    /* MOBILE CARD VIEW STYLES (Fixed)     */
-    /* ----------------------------------- */
-    
-    /* Hide table header on mobile */
-    .user-table thead {
-        display: none;
-    }
-    
-    /* Make table rows act as blocks/cards */
-    .user-table, .user-table tbody, .user-table tr, .user-table td {
-        display: block;
-        width: 100%; /* Important for card structure */
-    }
-    
-    .user-table tr {
-        border: 1px solid #e2e8f0;
-        border-radius: 12px;
-        margin-bottom: 12px; /* Space between cards */
-        padding: 15px;
-        background: #ffffff;
-        box-shadow: 0 4px 12px rgba(15,23,42,0.05);
-        transition: none; /* Remove hover effect for rows as they are now cards */
-        display: flex; /* Retain flex for ordering */
-        flex-direction: column;
-    }
-    
-    .user-table tbody tr:hover {
-        background: #ffffff; /* Keep background white on hover */
-    }
-    
-    /* Remove default cell padding and bottom border */
-    .user-table tbody td {
-        padding: 8px 0;
-        border-bottom: none;
-        text-align: right; /* Align value to the right (default for data) */
-        position: relative;
-        font-size: 0.9rem;
-    }
-    
-    /* Add a pseudo-element to show the column header as a label */
-    .user-table tbody td:before {
-        content: attr(data-label);
-        float: left;
-        font-weight: 500;
-        color: #64748b;
-        text-transform: uppercase;
-        font-size: 0.75rem;
-        letter-spacing: 0.05em;
-    }
-
-    /* Specific styling for 'Manage' button to be full width */
-    .user-table tbody td:last-child {
-        text-align: center;
-        margin-top: 10px;
-        padding-top: 15px;
-        border-top: 1px dashed #e2e8f0;
-    }
-    
-    .manage-btn {
-        width: 100%;
-        justify-content: center;
-    }
-    
-    /* --- FIXES START HERE --- */
-    
-    /* ID number fix */
-    .cell-id {
-        /* Reset positioning for ID number on mobile */
-        position: static; 
-        padding-top: 0;
-        margin-bottom: 5px; 
-        font-size: 0.85rem; 
-        color: #9ca3af;
-    }
-    .cell-id:before {
-        /* Show ID label */
-        content: 'ID'; 
-        float: none; 
-        margin-right: 5px; 
-        font-weight: 600; 
-        color: #9ca3af; 
-    }
-    
-    /* Special formatting for Name/Email which are the primary info */
-    .cell-name {
-        /* Adjusted for profile image container. Must allow the flex child to dictate height. */
-        padding-left: 0; 
-        padding-right: 0;
-        margin-bottom: 5px;
-    }
-    .cell-name:before {
-        content: none; /* Name/Profile should not have a label */
-    }
-    .cell-email:before {
-        content: 'Email'; 
-    }
-    
-    /* Move status/role to top right of card header */
-    .user-table tbody tr td:nth-child(4), /* Role */
-    .user-table tbody tr td:nth-child(5) { /* Status */
-        display: inline-block;
-        width: auto;
-        padding: 0 0 5px 0; 
-        float: right; 
-        clear: none; 
-        margin-left: 8px; 
-    }
-    
-    .user-table tbody tr td:nth-child(5) { /* Status */
-        float: right; 
-        order: -1; /* Move it to the very top */
-    }
-    
-    .user-table tbody tr td:nth-child(4) { /* Role */
-        float: right; 
-        order: -1; /* Move it to the very top */
-    }
-
-    /* --- CORRECTED ORDERING LOGIC --- */
-
-    /* 1. Name cell (Profile/Name) must be order 0 to be the first element after the floating badges (-1) */
-    .user-table tbody tr td:nth-child(2) { /* Name */
-        order: 0; 
-        text-align: left; /* Ensures it is aligned to the left (Top-Left) */
-    }
-    
-    /* 2. ID cell (Cell 1) moves slightly down */
-    .user-table tbody tr td:nth-child(1) {
-        order: 0.5; 
-        text-align: left; /* Ensure ID is aligned with Name */
-    }
-
-    /* 3. Email and Joined move to order 1 */
-    .user-table tbody tr td:nth-child(3), /* Email */
-    .user-table tbody tr td:nth-child(6) { /* Joined */
-        order: 1; 
-    }
-    
-    /* Role and Status badges should not have pseudo-elements (labels) */
-    .user-table tbody tr td:nth-child(4):before,
-    .user-table tbody tr td:nth-child(5):before {
-        content: none;
-    }
-    
-    /* 4. Ensure action button is last */
-    .user-table tbody tr td:last-child {
-        order: 2;
-    }
-    
-    .user-table tbody tr {
-        display: flex;
-        flex-direction: column;
-    }
-}
+/* ============================================================
+   CUSTOMERS (Phase 9g) — tokens + sx-table / sx-chip / sx-pill mula sa assets/style.css
+   ============================================================ */
+.cm { max-width: 1440px; padding-block: var(--sx-space-5) var(--sx-space-8); }
+.cm-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--sx-space-3); margin-bottom: var(--sx-space-5); }
+.cm-head p { margin: var(--sx-space-2) 0 0; color: var(--sx-muted); }
+.cm-tools { display: grid; gap: var(--sx-space-3); margin-bottom: var(--sx-space-4); padding: var(--sx-space-4); }
+.cm-tools form { display: flex; flex-wrap: wrap; gap: var(--sx-space-2); }
+.cm-tools .sx-input { flex: 1 1 240px; min-width: 0; }
+.cm-tools .sx-select { width: auto; }
+.cm-chips { display: flex; flex-wrap: wrap; gap: var(--sx-space-2); }
+.cm-chips .sx-chip span { margin-left: 4px; opacity: 0.7; }
+.cm-table tbody tr { cursor: pointer; }
+.cm-table .num { text-align: right; white-space: nowrap; }
+.cm-table .muted { color: var(--sx-muted); font-size: var(--sx-text-sm); white-space: nowrap; }
+.cm-user { display: flex; align-items: center; gap: var(--sx-space-3); min-width: 220px; }
+.cm-user img { flex-shrink: 0; width: 40px; height: 40px; border-radius: 50%; background: var(--sx-surface-alt); object-fit: cover; }
+.cm-user strong { display: block; color: var(--sx-dark); }
+.cm-user small { color: var(--sx-muted); }
+.cm-role { padding: 2px 10px; border-radius: var(--sx-radius-pill); font-size: var(--sx-text-xs); font-weight: var(--sx-weight-bold); background: var(--sx-surface-alt); color: var(--sx-muted); }
+.cm-role.admin { background: var(--sx-status-cancelled-bg); color: var(--sx-status-cancelled); }
+.cm-role.business { background: var(--sx-primary-soft); color: var(--sx-primary); }
+@media (max-width: 767.98px) { .cm-table .hide-sm { display: none; } }
 </style>
 
-<div class="user-shell">
-    <div class="user-header">
-        <div class="user-title-block">
-            <h1>User management</h1>
-            <p>Review roles, status, and activity across your user base.</p>
+<div class="cm sx-container">
+    <div class="cm-head">
+        <div>
+            <span class="sx-eyebrow">People</span>
+            <h1 class="sx-heading-lg">Customers</h1>
+            <p><?= array_sum($roleCounts) ?> accounts · <?= (int)($roleCounts['customer'] ?? 0) ?> customers · <?= (int)($roleCounts['business'] ?? 0) ?> business · <?= (int)($roleCounts['admin'] ?? 0) ?> admins</p>
         </div>
-        <div class="user-search-wrap">
-            <div class="search-wrap">
-                <span class="user-search-icon">
-                    <i class="fas fa-search"></i>
-                </span>
-                <input type="text"
-                       id="searchCustomer"
-                       class="user-search-input"
-                       placeholder="Search by name, email, or role">
-            </div>
-        </div>
+        <a href="view_logs.php" class="sx-btn sx-btn-outline sx-btn-sm"><i class="fa-solid fa-list"></i> Activity logs</a>
     </div>
 
-    <div class="user-stats">
-        <div class="user-stat-pill">
-            <i class="fas fa-users"></i>
-            <?php echo count($customers); ?> total users
+    <?php if ($flash): ?>
+        <div class="sx-alert sx-alert-<?= h($flash[0]) ?>" role="status" style="margin-bottom: var(--sx-space-4)">
+            <i class="fa-solid fa-circle-check"></i><div><?= h($flash[1]) ?></div>
         </div>
-        <div class="user-stat-pill">
-            <i class="fas fa-user-shield"></i>
-            Admins:
-            <?php echo count(array_filter($customers, fn($u) => $u['role'] === 'admin')); ?>
+    <?php endif; ?>
+
+    <div class="sx-card cm-tools">
+        <div class="cm-chips" aria-label="Filter by role">
+            <?php foreach ($roles as $k => $label): ?>
+                <a href="<?= h($url(['role' => $k === 'all' ? null : $k, 'page' => null])) ?>" class="sx-chip<?= $role === $k ? ' active' : '' ?>">
+                    <?= $label ?> <span><?= $k === 'all' ? array_sum($roleCounts) : (int)($roleCounts[$k] ?? 0) ?></span>
+                </a>
+            <?php endforeach; ?>
         </div>
-        <div class="user-stat-pill">
-            <i class="fas fa-user"></i>
-            Customers:
-            <?php echo count(array_filter($customers, fn($u) => $u['role'] === 'customer')); ?>
-        </div>
-        <div class="user-stat-pill">
-            <i class="fas fa-building"></i>
-            Business:
-            <?php echo count(array_filter($customers, fn($u) => $u['role'] === 'business')); ?>
-        </div>
+        <form method="get" role="search">
+            <?php if ($role !== 'all'): ?><input type="hidden" name="role" value="<?= h($role) ?>"><?php endif; ?>
+            <input type="search" name="q" class="sx-input" placeholder="Name, username or email…" value="<?= h($search) ?>" aria-label="Search accounts">
+            <select name="status" class="sx-select" aria-label="Account status">
+                <?php foreach ($statuses as $k => $label): ?><option value="<?= $k ?>" <?= $status === $k ? 'selected' : '' ?>><?= $label ?></option><?php endforeach; ?>
+            </select>
+            <button type="submit" class="sx-btn sx-btn-dark sx-btn-sm"><i class="fa-solid fa-magnifying-glass"></i> Search</button>
+            <?php if ($search || $status !== 'all'): ?>
+                <a href="<?= h($url(['q' => null, 'status' => null, 'page' => null])) ?>" class="sx-btn sx-btn-ghost sx-btn-sm">Clear</a>
+            <?php endif; ?>
+        </form>
     </div>
 
-    <div class="user-card">
-        <div class="user-card-header">
-            <div>
-                <h5>All registered users</h5>
-                <div class="user-card-sub">Search, inspect, and manage account access.</div>
+    <?php if ($users): ?>
+        <div class="sx-card" style="padding: 0; overflow: hidden">
+            <div class="sx-table-wrap" style="border: 0; border-radius: 0">
+                <table class="sx-table cm-table">
+                    <thead>
+                        <tr>
+                            <th>Account</th>
+                            <th>Role</th>
+                            <th>Status</th>
+                            <th class="num hide-sm">Orders</th>
+                            <th class="num hide-sm">Spent</th>
+                            <th class="hide-sm">Last login</th>
+                            <th class="hide-sm">Joined</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($users as $u):
+                            [$stateLabel, $statePill] = sx_account_state($u);
+                            $link = 'user_actions.php?id=' . (int)$u['id'];
+                        ?>
+                            <tr data-href="<?= $link ?>">
+                                <td>
+                                    <div class="cm-user">
+                                        <img src="<?= h($u['profile_image'] ?: $defaultAvatar) ?>" alt="" loading="lazy" onerror="this.src='<?= $defaultAvatar ?>'">
+                                        <div><a href="<?= $link ?>" style="text-decoration: none"><strong><?= h($u['name']) ?></strong></a><small><?= h($u['email']) ?></small></div>
+                                    </div>
+                                </td>
+                                <td><span class="cm-role <?= h($u['role']) ?>"><?= h($roleLabels[$u['role']] ?? ucfirst($u['role'])) ?></span></td>
+                                <td><span class="sx-pill sx-pill-<?= $statePill ?>"><?= $stateLabel ?></span></td>
+                                <td class="num hide-sm"><?= (int)$u['orders'] ?></td>
+                                <td class="num hide-sm">₱<?= number_format((float)$u['spent'], 2) ?></td>
+                                <td class="muted hide-sm"><?= $u['last_login_at'] ? date('M j, Y', strtotime($u['last_login_at'])) : 'Never' ?></td>
+                                <td class="muted hide-sm"><?= date('M j, Y', strtotime($u['created_at'])) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
             </div>
         </div>
-        <div class="user-table-wrap">
-            <table class="user-table" id="customerTable">
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Name</th>
-                        <th>Email</th>
-                        <th>Role</th>
-                        <th>Status</th>
-                        <th>Joined</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody>
-                <?php foreach ($customers as $c): ?>
-                    <?php $statusData = get_user_status($c['suspended_until'], $c['last_login_at']); ?>
-                    <tr>
-                        <td class="cell-id" data-label="ID">#<?php echo (int)$c['id']; ?></td>
-                        <td class="cell-name" data-label="Name">
-                            <div style="display: flex; align-items: flex-start; gap: 10px; min-height: 40px; width: 100%;">
-                                <?php
-                                    $profileImage = $c['profile_image'] ?? '';
-                                    if (!empty($profileImage)):
-                                ?>
-                                    <img src="<?php echo htmlspecialchars($profileImage); ?>" 
-                                         alt="<?php echo htmlspecialchars($c['name']); ?>'s profile image"
-                                         style="width: 38px; height: 38px; border-radius: 50%; object-fit: cover; border: 1px solid #e2e8f0; min-width: 38px;">
-                                <?php else: ?>
-                                    <span style="display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 50%; background-color: #e5e7eb; color: #9ca3af; font-size: 1.2rem; border: 1px solid #e2e8f0; min-width: 38px;">
-                                        <i class="fas fa-user-circle"></i>
-                                    </span>
-                                <?php endif; ?>
-                                <span style="display: block; font-weight: inherit; font-size: 1.1rem; line-height: 1.2; padding-top: 8px;"><?php echo htmlspecialchars($c['name']); ?></span>
-                            </div>
-                        </td>
-                        <td class="cell-email" data-label="Email">
-                            <a href="mailto:<?php echo htmlspecialchars($c['email']); ?>">
-                                <?php echo htmlspecialchars($c['email']); ?>
-                            </a>
-                        </td>
-                        <td data-label="Role">
-                            <span class="role-badge <?php echo get_role_badge_class($c['role']); ?>">
-                                <span class="role-dot"></span>
-                                <?php echo ucfirst($c['role']); ?>
-                            </span>
-                        </td>
-                        <td data-label="Status">
-                            <span class="status-badge <?php echo $statusData['class']; ?>">
-                                <?php echo $statusData['status']; ?>
-                            </span>
-                        </td>
-                        <td class="text-muted" data-label="Joined">
-                            <?php echo date("M d, Y", strtotime($c['created_at'])); ?>
-                        </td>
-                        <td style="text-align:right;" data-label="Actions">
-                            <a href="user_actions.php?id=<?php echo (int)$c['id']; ?>" class="manage-btn">
-                                <i class="fas fa-sliders"></i>
-                                Manage
-                            </a>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
+
+        <div class="ap-pager">
+            <span>Showing <?= $offset + 1 ?>–<?= $offset + count($users) ?> of <?= $total ?></span>
+            <?php if ($totalPages > 1): ?>
+                <nav aria-label="Pages">
+                    <?php if ($page > 1): ?><a href="<?= h($url(['page' => $page - 1])) ?>" aria-label="Previous page"><i class="fa-solid fa-chevron-left"></i></a><?php endif; ?>
+                    <?php for ($i = max(1, $page - 2); $i <= min($totalPages, $page + 2); $i++): ?>
+                        <?php if ($i === $page): ?><span class="cur" aria-current="page"><?= $i ?></span>
+                        <?php else: ?><a href="<?= h($url(['page' => $i])) ?>"><?= $i ?></a><?php endif; ?>
+                    <?php endfor; ?>
+                    <?php if ($page < $totalPages): ?><a href="<?= h($url(['page' => $page + 1])) ?>" aria-label="Next page"><i class="fa-solid fa-chevron-right"></i></a><?php endif; ?>
+                </nav>
+            <?php endif; ?>
         </div>
-    </div>
+    <?php else: ?>
+        <div class="sx-card sx-empty">
+            <i class="fa-solid fa-users"></i>
+            <h3>No accounts found</h3>
+            <p>Try a different search or filter.</p>
+        </div>
+    <?php endif; ?>
 </div>
 
 <script>
-// Live Search
-document.getElementById('searchCustomer').addEventListener('keyup', function () {
-    const filter = this.value.toLowerCase();
-    const rows   = document.querySelectorAll("#customerTable tbody tr");
-
-    rows.forEach(row => {
-        // Search against all text in the row
-        const text = row.innerText.toLowerCase();
-        row.style.display = text.includes(filter) ? "" : "none";
-    });
-});
+document.querySelectorAll('.cm-table tr[data-href]').forEach((tr) => tr.addEventListener('click', (e) => {
+    if (!e.target.closest('a')) window.location.href = tr.dataset.href;
+}));
 </script>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>

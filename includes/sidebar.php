@@ -31,7 +31,7 @@ if (is_admin()) {
         ],
         'Account' => [
             ['admin/settings_admin.php', 'fa-gear', 'Settings', ['admin/settings_admin.php']],
-            ['about.php', 'fa-circle-info', 'About Us', ['about.php', 'admin/about_edit.php']],
+            ['about.php', 'fa-circle-info', 'About Us', ['about.php']],
         ],
     ];
 } else {
