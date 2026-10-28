@@ -7,8 +7,11 @@ if (!function_exists('sx_stock_apply')) {
 
     /**
      * $mode: 'in' | 'out' | 'adjust'
-     * $rows: [['product_id'=>, 'location_id'=>, 'quantity'=>, 'remark'=>, 'direction'=>'add'|'deduct'], ...]
+     * $rows: [['product_id'=>, 'location_id'=>, 'quantity'=>, 'remark'=>, 'direction'=>'add'|'deduct',
+     *          'ref_type'=>'po'|'order'|null, 'ref_id'=>int|null], ...]
      * Nagbabalik ng bilang ng na-save na row; RuntimeException kapag may mali (walang na-save).
+     * Kapag may bukas nang transaction ang caller (hal. sx_po_receive), doon ito sasama:
+     * ang caller ang magko-commit o magro-rollback.
      */
     function sx_stock_apply(PDO $pdo, string $mode, array $rows, string $user, string $master = ''): int
     {
@@ -27,11 +30,12 @@ if (!function_exists('sx_stock_apply')) {
         $upd = $pdo->prepare("UPDATE inventory SET quantity = ?, updated_at = NOW() WHERE id = ?");
         $ins = $pdo->prepare("INSERT INTO inventory (product_id, location_id, quantity, updated_at) VALUES (?, ?, ?, NOW())");
         $log = $pdo->prepare("
-            INSERT INTO stock_movements (product_id, location_id, movement_type, quantity, remark, user_name, created_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+            INSERT INTO stock_movements (product_id, location_id, movement_type, quantity, remark, ref_type, ref_id, user_name, created_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
         ");
 
-        $pdo->beginTransaction();
+        $own = !$pdo->inTransaction();
+        if ($own) $pdo->beginTransaction();
         try {
             $count = 0;
             foreach ($rows as $r) {
@@ -62,14 +66,16 @@ if (!function_exists('sx_stock_apply')) {
                 if ($mode === 'adjust') {
                     $remark = ($deduct ? '[DEDUCT] ' : '[ADD] ') . trim($master) . ($remark !== '' ? " ({$remark})" : '');
                 }
-                $log->execute([$pid, $lid, $type, $qty, mb_substr($remark, 0, 255), $user, $user]);
+                $refType = isset($r['ref_type']) && $r['ref_type'] !== '' ? (string)$r['ref_type'] : null;
+                $refId   = isset($r['ref_id']) ? (int)$r['ref_id'] : null;
+                $log->execute([$pid, $lid, $type, $qty, mb_substr($remark, 0, 255), $refType, $refId, $user, $user]);
                 $count++;
             }
             if ($count === 0) throw new RuntimeException('Add at least one item.');
-            $pdo->commit();
+            if ($own) $pdo->commit();
             return $count;
         } catch (Throwable $e) {
-            $pdo->rollBack();
+            if ($own) $pdo->rollBack();
             throw $e;
         }
     }
