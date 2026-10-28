@@ -7,6 +7,8 @@ if (!is_admin()) {
     exit;
 }
 
+require_once __DIR__ . '/../includes/purchasing_ops.php'; // sx_reorder_items (supply chain tiles)
+
 $currentAdmin = $_SESSION['user'] ?? [];
 
 // Mga default para hindi mag-warning ang page kapag pumalya ang DB
@@ -15,6 +17,7 @@ $attention = ['pending' => 0, 'po' => 0, 'cancel' => 0, 'delivered' => 0];
 $monthLabels = $monthRevenue = $flowLabels = $flowIn = $flowOut = [];
 $statusCounts = $topProducts = $lowStockList = $recentOrders = [];
 $segments = ['customer' => 0, 'business' => 0, 'new30' => 0];
+$supply = ['reorder' => 0, 'reorderCost' => 0, 'arriving' => 0, 'arrivingUnits' => 0, 'late' => 0, 'costValue' => 0, 'costed' => 0, 'products' => 0];
 
 try {
     // ---- Sales: kita = delivered + completed lang (dati: kasama pati cancelled at pending)
@@ -134,6 +137,32 @@ try {
                SUM(created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) AS new30
         FROM users
     ")->fetch(PDO::FETCH_ASSOC);
+
+    // ---- Supply chain (Phase 7e)
+    foreach (sx_reorder_items($pdo) as $r) {
+        if ($r['suggest'] > 0) {
+            $supply['reorder']++;
+            $supply['reorderCost'] += $r['suggest'] * (float)$r['cost_price'];
+        }
+    }
+    $po = $pdo->query("
+        SELECT SUM(po.expected_date BETWEEN CURDATE() AND CURDATE() + INTERVAL 7 DAY) AS arriving,
+               SUM(po.expected_date < CURDATE()) AS late,
+               COALESCE(SUM(CASE WHEN po.expected_date <= CURDATE() + INTERVAL 7 DAY THEN i.left_units END), 0) AS arriving_units
+        FROM purchase_orders po
+        LEFT JOIN (SELECT po_id, SUM(qty_ordered - qty_received) AS left_units FROM purchase_order_items GROUP BY po_id) i ON i.po_id = po.id
+        WHERE po.status IN ('sent', 'partial')
+    ")->fetch(PDO::FETCH_ASSOC);
+    $supply['arriving']      = (int)$po['arriving'];
+    $supply['late']          = (int)$po['late'];
+    $supply['arrivingUnits'] = (int)$po['arriving_units'];
+    $c = $pdo->query("
+        SELECT COALESCE(SUM(q.qty * q.cost_price), 0) AS value, SUM(q.cost_price IS NOT NULL) AS costed, COUNT(*) AS products
+        FROM (SELECT p.cost_price, COALESCE(SUM(i.quantity), 0) AS qty FROM products p LEFT JOIN inventory i ON i.product_id = p.id GROUP BY p.id, p.cost_price) q
+    ")->fetch(PDO::FETCH_ASSOC);
+    $supply['costValue'] = (float)$c['value'];
+    $supply['costed']    = (int)$c['costed'];
+    $supply['products']  = (int)$c['products'];
 
 } catch (PDOException $e) {
     error_log("Dashboard DB Error: " . $e->getMessage());
@@ -283,7 +312,7 @@ a.db-kpi:hover { transform: translateY(-2px); box-shadow: var(--sx-shadow-md); }
         <a href="/sweepxpress/admin/allorders.php" class="<?= $attention['pending'] ? 'hot' : '' ?>"><span>Pending orders</span><strong><?= (int)$attention['pending'] ?></strong></a>
         <a href="/sweepxpress/admin/allorders.php" class="<?= $attention['po'] ? 'hot' : '' ?>"><span>POs to review</span><strong><?= (int)$attention['po'] ?></strong></a>
         <a href="/sweepxpress/admin/allorders.php" class="<?= $attention['cancel'] ? 'hot' : '' ?>"><span>Cancel requests</span><strong><?= (int)$attention['cancel'] ?></strong></a>
-        <a href="/sweepxpress/admin/inventory.php?filter=low" class="<?= $kpi['low'] + $kpi['out'] ? 'hot' : '' ?>"><span>Items to restock</span><strong><?= $kpi['low'] + $kpi['out'] ?></strong></a>
+        <a href="/sweepxpress/admin/reorder.php" class="<?= $supply['reorder'] ? 'hot' : '' ?>"><span>Needs reorder</span><strong><?= $supply['reorder'] ?></strong></a>
     </div>
 
     <!-- Sales KPIs -->
@@ -334,6 +363,31 @@ a.db-kpi:hover { transform: translateY(-2px); box-shadow: var(--sx-shadow-md); }
             <div class="db-kpi-value"><?= number_format($kpi['out']) ?></div>
             <div class="db-kpi-meta">Can't be ordered</div>
         </a>
+    </div>
+
+    <!-- Supply chain KPIs (Phase 7e) -->
+    <div class="db-section-label">Supply chain</div>
+    <div class="db-kpis">
+        <a href="/sweepxpress/admin/reorder.php" class="sx-card db-kpi">
+            <div class="db-kpi-top"><span class="db-kpi-label">Needs reorder</span><span class="db-kpi-icon warn"><i class="fa-solid fa-cart-flatbed"></i></span></div>
+            <div class="db-kpi-value"><?= number_format($supply['reorder']) ?></div>
+            <div class="db-kpi-meta">About <?= $peso($supply['reorderCost']) ?> at cost</div>
+        </a>
+        <a href="/sweepxpress/admin/purchase_orders.php?tab=sent" class="sx-card db-kpi">
+            <div class="db-kpi-top"><span class="db-kpi-label">Arriving this week</span><span class="db-kpi-icon"><i class="fa-solid fa-truck-ramp-box"></i></span></div>
+            <div class="db-kpi-value"><?= number_format($supply['arriving']) ?></div>
+            <div class="db-kpi-meta"><?= number_format($supply['arrivingUnits']) ?> units due by <?= date('M j', strtotime('+7 days')) ?></div>
+        </a>
+        <a href="/sweepxpress/admin/purchase_orders.php" class="sx-card db-kpi">
+            <div class="db-kpi-top"><span class="db-kpi-label">Late deliveries</span><span class="db-kpi-icon danger"><i class="fa-solid fa-clock"></i></span></div>
+            <div class="db-kpi-value"><?= number_format($supply['late']) ?></div>
+            <div class="db-kpi-meta">Past expected date</div>
+        </a>
+        <div class="sx-card db-kpi">
+            <div class="db-kpi-top"><span class="db-kpi-label">Stock value at cost</span><span class="db-kpi-icon accent"><i class="fa-solid fa-coins"></i></span></div>
+            <div class="db-kpi-value"><?= $peso($supply['costValue']) ?></div>
+            <div class="db-kpi-meta"><?= $supply['costed'] ?> of <?= $supply['products'] ?> products have a cost price</div>
+        </div>
     </div>
 
     <!-- Charts -->

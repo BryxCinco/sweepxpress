@@ -335,4 +335,34 @@ if (!function_exists('sx_po_statuses')) {
         if ($reorderQty) return $reorderQty;
         return max(1, $reorderPoint * 2 - $stock - $onOrder);
     }
+
+    /**
+     * Mga produktong nasa o mas mababa sa reorder point (admin/reorder.php at dashboard).
+     * Bawat isa: stock, on_order, suggest (0 = sapat na ang darating), cost, at supplier.
+     * Nauuna ang pinakakulang (stock kumpara sa reorder point).
+     */
+    function sx_reorder_items(PDO $pdo): array
+    {
+        $onOrder = sx_po_on_order($pdo);
+        // Nakabalot sa subquery: hindi puwedeng gamitin ang aggregate alias sa ORDER BY expression (MariaDB 1247)
+        $rows = $pdo->query("
+            SELECT * FROM (
+                SELECT p.id, p.name, p.sku, p.image_path, p.cost_price, p.reorder_point, p.reorder_qty,
+                       p.supplier_id, s.name AS supplier_name, s.is_active AS supplier_active, s.lead_time_days,
+                       COALESCE(SUM(i.quantity), 0) AS stock
+                FROM products p
+                LEFT JOIN inventory i ON i.product_id = p.id
+                LEFT JOIN suppliers s ON s.id = p.supplier_id
+                GROUP BY p.id
+            ) t
+            WHERE t.stock <= t.reorder_point
+            ORDER BY t.stock / GREATEST(t.reorder_point, 1) ASC, t.name
+        ")->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as &$r) {
+            $r['on_order'] = (int)($onOrder[$r['id']] ?? 0);
+            $r['suggest']  = sx_po_suggest_qty((int)$r['stock'], $r['on_order'], (int)$r['reorder_point'],
+                                               $r['reorder_qty'] === null ? null : (int)$r['reorder_qty']);
+        }
+        return $rows;
+    }
 }
