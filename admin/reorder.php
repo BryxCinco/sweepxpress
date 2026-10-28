@@ -10,6 +10,7 @@ if (!is_admin()) {
 }
 require_once __DIR__ . '/../includes/admin_products.php';   // sx_flash, sx_csrf_*
 require_once __DIR__ . '/../includes/purchasing_ops.php';
+require_once __DIR__ . '/../includes/forecast_ops.php';
 require_once __DIR__ . '/../includes/supplier_ops.php';     // sx_supplier_initials
 
 // =================================================================================
@@ -44,6 +45,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
 // DISPLAY
 // =================================================================================
 $items   = sx_reorder_items($pdo);
+$window   = sx_forecast_window();
+$velocity = sx_sales_velocity($pdo, $window);
 $need    = array_values(array_filter($items, fn($r) => $r['suggest'] > 0));
 $covered = array_values(array_filter($items, fn($r) => $r['suggest'] === 0));
 
@@ -115,6 +118,7 @@ require_once __DIR__ . '/../includes/header.php';
 .ro-bar { position: relative; height: 6px; margin: 6px 0 4px; border-radius: var(--sx-radius-pill); background: var(--sx-surface-alt); }
 .ro-bar i { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--sx-status-pending); }
 .ro-bar i.out { background: var(--sx-status-cancelled); }
+.ro-days.low, .ro-days.out { color: var(--sx-status-cancelled); font-weight: var(--sx-weight-semibold); }
 .ro-bar b { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: color-mix(in srgb, var(--sx-primary) 45%, transparent); }
 .ro-item .info small { font-size: var(--sx-text-xs); color: var(--sx-muted); }
 .ro-item .info small .out { color: var(--sx-status-cancelled); font-weight: var(--sx-weight-bold); }
@@ -148,7 +152,10 @@ require_once __DIR__ . '/../includes/header.php';
             <h1 class="sx-heading-lg">Reorder</h1>
             <p>Products at or below their reorder point, minus what is already on order. Tick what to buy and create a draft PO per supplier.</p>
         </div>
-        <a href="purchase_orders.php" class="sx-btn sx-btn-outline sx-btn-sm"><i class="fa-solid fa-file-invoice"></i> Purchase orders</a>
+        <div style="display: flex; align-items: center; gap: var(--sx-space-3); flex-wrap: wrap">
+            <?= sx_forecast_picker($window) ?>
+            <a href="purchase_orders.php" class="sx-btn sx-btn-outline sx-btn-sm"><i class="fa-solid fa-file-invoice"></i> Purchase orders</a>
+        </div>
     </div>
 
     <?php if ($flash): ?>
@@ -199,6 +206,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <div class="ro-items">
                     <?php foreach ($g['items'] as $r):
                         $stock = (int)$r['stock']; $rp = max(1, (int)$r['reorder_point']); $oo = $r['on_order'];
+                        [$dLabel, $dTone] = sx_days_label(sx_days_of_stock($stock, $velocity[(int)$r['id']]['per_day'] ?? 0.0), $stock, (int)$r['lead_time_days']);
                         $max = $rp * 2; // buong bar = 2× ng reorder point ?>
                         <div class="ro-item">
                             <input type="checkbox" name="pick[]" value="<?= (int)$r['id'] ?>" checked aria-label="Order <?= h($r['name']) ?>" <?= $g['active'] ? '' : 'disabled' ?>>
@@ -209,7 +217,7 @@ require_once __DIR__ . '/../includes/header.php';
                                     <b style="width: <?= min(100, round(($stock + $oo) / $max * 100)) ?>%"></b>
                                     <i class="<?= $stock === 0 ? 'out' : '' ?>" style="width: <?= min(100, round($stock / $max * 100)) ?>%"></i>
                                 </div>
-                                <small><span class="<?= $stock === 0 ? 'out' : '' ?>"><?= $stock === 0 ? 'Out of stock' : number_format($stock) . ' in stock' ?></span><?= $oo ? ' · ' . number_format($oo) . ' on order' : '' ?> · reorder at <?= (int)$r['reorder_point'] ?></small>
+                                <small><span class="<?= $stock === 0 ? 'out' : '' ?>"><?= $stock === 0 ? 'Out of stock' : number_format($stock) . ' in stock' ?></span><?= $oo ? ' · ' . number_format($oo) . ' on order' : '' ?> · reorder at <?= (int)$r['reorder_point'] ?> · <span class="ro-days <?= $dTone ?>"><?= h($dLabel) ?></span></small>
                             </div>
                             <div class="ro-fields">
                                 <label>Qty <input type="number" name="qty[<?= (int)$r['id'] ?>]" class="sx-input" min="1" max="100000" step="1" value="<?= (int)$r['suggest'] ?>" <?= $g['active'] ? '' : 'disabled' ?>></label>

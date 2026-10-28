@@ -10,6 +10,7 @@ if (!is_admin()) { header("Location: /sweepxpress/login.php"); exit; }
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../includes/admin_products.php';
 require_once __DIR__ . '/../includes/purchasing_ops.php'; // sx_po_on_order
+require_once __DIR__ . '/../includes/forecast_ops.php';   // sx_sales_velocity
 
 // =================================================================================
 // 1. CSV EXPORT
@@ -84,7 +85,7 @@ $havingClause = match ($filter) {
 
 $base = "
     SELECT p.id, p.name, COALESCE(p.sku, '') AS sku, COALESCE(p.price, 0) AS price, p.cost_price, p.image_path, p.reorder_point,
-           p.category, s.name AS supplier_name,
+           p.category, s.name AS supplier_name, s.lead_time_days,
            IFNULL(SUM(i.quantity), 0) AS real_stock,
            (SELECT MAX(created_at) FROM stock_movements WHERE product_id = p.id) AS last_move
     FROM products p
@@ -108,6 +109,8 @@ $stmt = $pdo->prepare("SELECT * FROM ({$base}) t ORDER BY {$order} LIMIT {$limit
 $stmt->execute($params);
 $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $onOrder  = sx_po_on_order($pdo);
+$window   = sx_forecast_window();
+$velocity = sx_sales_velocity($pdo, $window);
 $incoming = array_sum($onOrder);
 
 $flash = sx_flash();
@@ -185,6 +188,9 @@ a.iv-tile:hover { transform: translateY(-2px); box-shadow: var(--sx-shadow-md); 
 .iv-stats { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sx-space-2); }
 .iv-stats div { padding: var(--sx-space-2) var(--sx-space-3); border-radius: var(--sx-radius-md); background: var(--sx-surface-alt); }
 .iv-stats span { display: block; font-size: var(--sx-text-xs); color: var(--sx-muted); }
+.iv-days.low { color: var(--sx-status-cancelled); }
+.iv-days.out { color: var(--sx-status-cancelled); }
+.iv-days.none { color: var(--sx-muted); font-weight: var(--sx-weight-regular); }
 .iv-stats b { font-size: var(--sx-text-sm); color: var(--sx-dark); }
 .iv-card-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sx-space-2); margin-top: auto; padding-top: var(--sx-space-3); border-top: 1px solid var(--sx-border-light); }
 .iv-card-foot small { min-width: 0; overflow: hidden; font-size: var(--sx-text-xs); color: var(--sx-muted); text-overflow: ellipsis; white-space: nowrap; }
@@ -259,6 +265,7 @@ a.iv-tile:hover { transform: translateY(-2px); box-shadow: var(--sx-shadow-md); 
             <a href="<?= h($url(['filter' => null, 'page' => null])) ?>" class="sx-chip<?= $filter === 'all' ? ' active' : '' ?>">All items <span><?= (int)$valData['products'] ?></span></a>
             <a href="<?= h($url(['filter' => 'low', 'page' => null])) ?>" class="sx-chip<?= $filter === 'low' ? ' active' : '' ?>">Low stock <span><?= (int)$valData['low_stock_count'] ?></span></a>
             <a href="<?= h($url(['filter' => 'out', 'page' => null])) ?>" class="sx-chip<?= $filter === 'out' ? ' active' : '' ?>">Out of stock <span><?= (int)$valData['out_of_stock_count'] ?></span></a>
+            <?= sx_forecast_picker($window, ['search' => $search, 'filter' => $filter === 'all' ? null : $filter]) ?>
         </div>
     </div>
 
@@ -271,6 +278,8 @@ a.iv-tile:hover { transform: translateY(-2px); box-shadow: var(--sx-shadow-md); 
                 $cls   = $stock === 0 ? 'out' : ($stock <= $rp ? 'low' : 'in');
                 $max   = max(1, $rp * 3, $stock + $oo);   // sukat ng gauge: hindi bababa sa 3× ng reorder point
                 $historyUrl = 'product_history.php?product_id=' . (int)$p['id'];
+                $perDay = $velocity[(int)$p['id']]['per_day'] ?? 0.0;
+                [$dLabel, $dTone] = sx_days_label(sx_days_of_stock($stock, $perDay), $stock, (int)($p['lead_time_days'] ?? 7));
             ?>
                 <article class="sx-card iv-card <?= $cls ?>" data-href="<?= $historyUrl ?>">
                     <div class="iv-card-top">
@@ -295,6 +304,8 @@ a.iv-tile:hover { transform: translateY(-2px); box-shadow: var(--sx-shadow-md); 
                     <div class="iv-stats">
                         <div><span>Value</span><b>₱<?= number_format($stock * (float)$p['price'], 2) ?></b></div>
                         <div><span>Unit price</span><b>₱<?= number_format((float)$p['price'], 2) ?></b></div>
+                        <div><span>Sells</span><b><?= $perDay > 0 ? rtrim(rtrim(number_format($perDay, 2), '0'), '.') . '/day' : '—' ?></b></div>
+                        <div><span>Runs out</span><b class="iv-days <?= $dTone ?>"><?= h($dLabel) ?></b></div>
                     </div>
                     <div class="iv-card-foot">
                         <small><i class="fa-regular fa-clock"></i> <?= $p['last_move'] ? 'Moved ' . date('M j, Y', strtotime($p['last_move'])) : 'No movements yet' ?><?= $p['supplier_name'] ? ' · ' . h($p['supplier_name']) : '' ?></small>
