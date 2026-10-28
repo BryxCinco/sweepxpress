@@ -25,6 +25,9 @@ if (is_admin()) {
             ['admin/inventory.php', 'fa-warehouse', 'Inventory', ['admin/inventory*', 'admin/stock_*', 'admin/product_history.php']],
             ['admin/customer_management.php', 'fa-users', 'Customers', ['admin/customer_management.php', 'admin/user_actions.php', 'admin/edit_role.php', 'admin/view_logs.php']],
         ],
+        'Supply chain' => [
+            ['admin/suppliers.php', 'fa-truck-field', 'Suppliers', ['admin/suppliers.php', 'admin/supplier.php']],
+        ],
         'Insights' => [
             ['admin/reports.php', 'fa-chart-line', 'Reports & Analytics', ['admin/reports.php']],
             ['admin/admin_contact.php', 'fa-envelope-open-text', 'Messages', ['admin/admin_contact.php']],
