@@ -103,7 +103,10 @@ a.sp-tile:hover { transform: translateY(-2px); box-shadow: var(--sx-shadow-md); 
             <h1 class="sx-heading-lg">Suppliers</h1>
             <p>Who you buy from, what they supply and how reliably they deliver.</p>
         </div>
-        <a href="supplier.php" class="sx-btn sx-btn-primary"><i class="fa-solid fa-plus"></i> Add supplier</a>
+        <div style="display: flex; gap: var(--sx-space-2); flex-wrap: wrap">
+            <a href="supplier_scorecard.php" class="sx-btn sx-btn-outline"><i class="fa-solid fa-ranking-star"></i> Scorecard</a>
+            <a href="supplier.php" class="sx-btn sx-btn-primary"><i class="fa-solid fa-plus"></i> Add supplier</a>
+        </div>
     </div>
 
     <?php if ($flash): ?>

@@ -99,4 +99,116 @@ if (!function_exists('sx_supplier_input')) {
     {
         return (int)$s['received_pos'] > 0 ? (int)round($s['on_time'] / $s['received_pos'] * 100) : null;
     }
+
+    // ---------------------------------------------------------------------------------
+    // Supplier scorecard (Phase 8d). Galing lahat sa natapos na PO (status 'received', kasama ang
+    // closed short): walang bagong table.
+    //   on-time  = dumating sa o bago ang expected_date
+    //   fill rate= natanggap ÷ in-order na dami
+    //   price    = unit_cost ng unang kumpara sa huling PO ng bawat product sa panahong iyon
+    //   score    = 40% on-time + 40% fill rate + 20% presyo (100 kung hindi tumaas; -5 puntos sa bawat +1%)
+    // ---------------------------------------------------------------------------------
+    define('SX_SC_MIN_POS', 2);   // kulang ang kasaysayan kung mas kaunti dito
+
+    /**
+     * supplier_id => ['supplier', 'pos', 'on_time_pct', 'avg_days_late', 'fill_pct', 'lead_actual', 'lead_promised',
+     *                 'prices' => [[product_id, name, first, last, pct], ...], 'price_avg_pct', 'price_up',
+     *                 'score', 'grade', 'tone']
+     * $days = null para sa lahat ng panahon. Pinakamataas ang score ang una.
+     */
+    function sx_supplier_scorecards(PDO $pdo, ?int $days = 365): array
+    {
+        $since = $days ? ' AND o.received_at >= DATE_SUB(NOW(), INTERVAL ' . (int)$days . ' DAY)' : '';
+
+        $pos = $pdo->query("
+            SELECT o.id, o.supplier_id, o.expected_date, DATE(o.received_at) AS received_on,
+                   DATEDIFF(o.received_at, o.sent_at) AS lead_days,
+                   SUM(i.qty_ordered) AS ordered, SUM(i.qty_received) AS received
+            FROM purchase_orders o
+            JOIN purchase_order_items i ON i.po_id = o.id
+            WHERE o.status = 'received' {$since}
+            GROUP BY o.id
+        ")->fetchAll(PDO::FETCH_ASSOC);
+
+        $lines = $pdo->query("
+            SELECT o.supplier_id, i.product_id, p.name, i.unit_cost
+            FROM purchase_orders o
+            JOIN purchase_order_items i ON i.po_id = o.id
+            JOIN products p ON p.id = i.product_id
+            WHERE o.status = 'received' AND i.qty_received > 0 AND i.unit_cost > 0 {$since}
+            ORDER BY o.received_at, o.id
+        ")->fetchAll(PDO::FETCH_ASSOC);
+
+        $acc = [];
+        foreach ($pos as $r) {
+            $a = &$acc[(int)$r['supplier_id']];
+            $a['pos'] = ($a['pos'] ?? 0) + 1;
+            $a['ordered'] = ($a['ordered'] ?? 0) + (int)$r['ordered'];
+            $a['received'] = ($a['received'] ?? 0) + (int)$r['received'];
+            if ($r['lead_days'] !== null) $a['leads'][] = (int)$r['lead_days'];
+            if ($r['expected_date'] !== null) {
+                $a['dated'] = ($a['dated'] ?? 0) + 1;
+                $late = (int)((strtotime($r['received_on']) - strtotime($r['expected_date'])) / 86400);
+                if ($late <= 0) $a['on_time'] = ($a['on_time'] ?? 0) + 1;
+                else $a['late_days'][] = $late;
+            }
+            unset($a);
+        }
+
+        $byProduct = [];
+        foreach ($lines as $l) {
+            $k = $l['supplier_id'] . ':' . $l['product_id'];
+            $byProduct[$k]['supplier_id'] = (int)$l['supplier_id'];
+            $byProduct[$k]['product_id'] = (int)$l['product_id'];
+            $byProduct[$k]['name'] = $l['name'];
+            $byProduct[$k]['costs'][] = (float)$l['unit_cost'];
+        }
+        $prices = [];
+        foreach ($byProduct as $p) {
+            if (count($p['costs']) < 2) continue;
+            $first = $p['costs'][0];
+            $last = $p['costs'][count($p['costs']) - 1];
+            $prices[$p['supplier_id']][] = ['product_id' => $p['product_id'], 'name' => $p['name'], 'first' => $first, 'last' => $last,
+                                            'pct' => ($last - $first) / $first * 100];
+        }
+
+        $out = [];
+        $suppliers = $pdo->query("SELECT * FROM suppliers ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($suppliers as $s) {
+            $id = (int)$s['id'];
+            $a = $acc[$id] ?? [];
+            if (!$a && !(int)$s['is_active']) continue;
+            $pl = $prices[$id] ?? [];
+            usort($pl, fn($x, $y) => abs($y['pct']) <=> abs($x['pct']));
+            $row = [
+                'supplier'      => $s,
+                'pos'           => $a['pos'] ?? 0,
+                'on_time_pct'   => !empty($a['dated']) ? (int)round(($a['on_time'] ?? 0) / $a['dated'] * 100) : null,
+                'avg_days_late' => !empty($a['late_days']) ? array_sum($a['late_days']) / count($a['late_days']) : null,
+                'fill_pct'      => !empty($a['ordered']) ? (int)round($a['received'] / $a['ordered'] * 100) : null,
+                'lead_actual'   => !empty($a['leads']) ? array_sum($a['leads']) / count($a['leads']) : null,
+                'lead_promised' => (int)$s['lead_time_days'],
+                'prices'        => $pl,
+                'price_avg_pct' => $pl ? array_sum(array_column($pl, 'pct')) / count($pl) : null,
+                'price_up'      => count(array_filter($pl, fn($x) => $x['pct'] >= 3)),
+                'score' => null, 'grade' => 'Not enough history', 'tone' => 'none',
+            ];
+            if ($row['pos'] >= SX_SC_MIN_POS) {
+                $parts = [];
+                if ($row['on_time_pct'] !== null) $parts[] = [0.4, $row['on_time_pct']];
+                if ($row['fill_pct'] !== null)    $parts[] = [0.4, $row['fill_pct']];
+                if ($row['price_avg_pct'] !== null) $parts[] = [0.2, max(0, min(100, 100 - max(0, $row['price_avg_pct']) * 5))];
+                if ($parts) {
+                    $w = array_sum(array_column($parts, 0));
+                    $row['score'] = (int)round(array_sum(array_map(fn($p) => $p[0] * $p[1], $parts)) / $w);
+                    [$row['grade'], $row['tone']] = $row['score'] >= 90 ? ['Excellent', 'ok']
+                        : ($row['score'] >= 75 ? ['Good', 'ok'] : ($row['score'] >= 60 ? ['Fair', 'warn'] : ['Needs attention', 'bad']));
+                }
+            }
+            $out[$id] = $row;
+        }
+        uasort($out, fn($x, $y) => [$y['score'] !== null, $y['score'] ?? 0, $x['supplier']['name']]
+                               <=> [$x['score'] !== null, $x['score'] ?? 0, $y['supplier']['name']]);
+        return $out;
+    }
 }
