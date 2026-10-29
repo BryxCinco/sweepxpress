@@ -69,5 +69,6 @@
         </div>
     </div>
 </footer>
+<?php require __DIR__ . '/copilot_widget.php'; // Admin Copilot: admin lang, /admin/ lang ?>
 </body>
 </html>
