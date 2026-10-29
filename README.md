@@ -11,7 +11,11 @@ suppliers, deliveries go back into stock, and supplier performance is scored fro
 ![Bootstrap 5.3](https://img.shields.io/badge/Bootstrap-5.3-7952B3?logo=bootstrap&logoColor=white)
 ![Chart.js](https://img.shields.io/badge/Chart.js-4.4-FF6384?logo=chartdotjs&logoColor=white)
 
-**Live demo:** <https://sweepxpress.infinityfree.io/sweepxpress/> (free hosting, so it can be slow to wake up)
+**Demo:** screenshots and a video walkthrough rather than a hands-on site. The admin side holds real operating
+data, so there is no public admin login; run the project locally (see *Getting started*) to explore it with the
+demo data and accounts below.
+
+<!-- Video walkthrough: add the link here once it is recorded, e.g. **Video:** <https://...> -->
 
 <!--
 SCREENSHOTS (owner: capture these at 1440px wide, save in docs/screenshots/, then uncomment this block)
@@ -152,14 +156,22 @@ mysql -u root sweepxpress_db < database/demo/purchase_orders.sql
 # later, to remove all demo data:  database/demo/remove_demo_data.sql
 ```
 
-### Demo accounts
+### Demo accounts (for running it yourself)
 
-`database/demo/accounts.sql` creates `admin@demo.sweepxpress.com`, `customer@demo.sweepxpress.com` and
-`business@demo.sweepxpress.com`. The file contains no password; you choose one:
+One command creates `admin@demo.sweepxpress.com`, `customer@demo.sweepxpress.com` and
+`business@demo.sweepxpress.com` (verified, safe to run again, and it links some demo orders to the customer and
+business accounts):
 
 ```bash
-php tools/make_password_hash.php     # prints a hash, paste it into accounts.sql, then run the file
+php tools/setup_demo.php                       # creates the ones that do not exist yet
+php tools/setup_demo.php --reset-password      # also resets the password of existing demo accounts
+php tools/setup_demo.php --password="..."      # use your own password instead of the default
 ```
+
+The default password is set at the top of `tools/setup_demo.php`. It is public because it lives in the source, so it is
+for demo use only; the script refuses to run against a database that is not on your own computer. If you prefer to
+keep the password out of the code, use `--password`, or the SQL route: `php tools/make_password_hash.php` prints a
+hash to paste into `database/demo/accounts.sql`.
 
 Every normal sign-in sends a one-time code by email, and the demo addresses have no mailbox. For a public demo site,
 add `DEMO_MODE=1` to `.env`: it skips the code for exactly those three addresses and nothing else.
@@ -198,7 +210,7 @@ incremental changes for databases that already exist, with the order and the rul
   policy, delivery tracking with proof of delivery, and multiple warehouses.
 - Facebook sign-in is disabled.
 - Checkout supports cash on delivery and purchase orders only (no online payment gateway).
-- The free hosting may block outbound requests, in which case the Copilot only works locally.
+- The project is deployed on free hosting, which may block outbound requests; there the Copilot would only work locally.
 
 ## Author
 

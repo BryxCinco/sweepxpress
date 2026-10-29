@@ -329,8 +329,8 @@ WHERE sm.remark LIKE 'Order #127 cancelled%';
 **Demo data** (`database/demo/*.sql`): adds fake suppliers, about 150 orders and restock orders so the dashboard,
 forecasts and scorecard are not empty. Everything is marked `[DEMO]` and `remove_demo_data.sql` removes it again.
 Use it only if the live database has no real customer orders you care about, in this order: `catalog.sql` (only on an
-empty catalogue), `suppliers.sql`, `sales.sql`, `purchase_orders.sql`. Skip `accounts.sql` on the live site: with
-`DEMO_MODE=0` the demo accounts cannot receive a sign-in code, so they could never sign in.
+empty catalogue), `suppliers.sql`, `sales.sql`, `purchase_orders.sql`. Skip `accounts.sql` and `tools/setup_demo.php` on the live site: with
+`DEMO_MODE=0` the demo accounts cannot receive a sign-in code, so they could never sign in (and their password is public).
 
 ## 8. Smoke test
 
