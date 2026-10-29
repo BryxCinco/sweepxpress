@@ -196,7 +196,7 @@ incremental changes for databases that already exist, with the order and the rul
 
 - Not built yet: a supplier portal (suppliers are records only), returns and refund handling beyond the written
   policy, delivery tracking with proof of delivery, and multiple warehouses.
-- Facebook sign-in is disabled. Google sign-in does not yet check for suspended accounts.
+- Facebook sign-in is disabled.
 - Checkout supports cash on delivery and purchase orders only (no online payment gateway).
 - The free hosting may block outbound requests, in which case the Copilot only works locally.
 
