@@ -1,0 +1,100 @@
+-- SweepXpress: sample product catalog (26 products with stock) for a fresh install or demo.
+-- Walang customer o order data. Patakbuhin pagkatapos ng database/schema.sql:
+--     mysql -u root sweepxpress_db < database/demo/catalog.sql
+-- Ligtas patakbuhin ulit (INSERT IGNORE). Ang mga larawan ng produkto ay nasa assets/ at uploads/.
+
+SET NAMES utf8mb4;
+
+
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
+/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!40101 SET NAMES utf8mb4 */;
+/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
+/*!40103 SET TIME_ZONE='+00:00' */;
+/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
+/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
+/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
+
+LOCK TABLES `locations` WRITE;
+/*!40000 ALTER TABLE `locations` DISABLE KEYS */;
+INSERT IGNORE INTO `locations` (`id`, `name`, `address`) VALUES (1,'Main Warehouse','Quezon');
+/*!40000 ALTER TABLE `locations` ENABLE KEYS */;
+UNLOCK TABLES;
+
+LOCK TABLES `products` WRITE;
+/*!40000 ALTER TABLE `products` DISABLE KEYS */;
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (1,'All-Purpose Cleaner','Cleaning Supplies',NULL,'APC-001','Powerful degreaser for floors and counters.',149.00,NULL,10,NULL,NULL,'/sweepxpress/uploads/1765167383_69365117a267c.jpg','2025-09-06 14:52:25',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (2,'Microfiber Mop','Equipment',NULL,'MOP-002','Washable head, lightweight aluminum handle.',399.00,NULL,10,NULL,NULL,'/sweepxpress/uploads/1765167450_6936515a4d362.jpg','2025-09-06 14:52:25',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (3,'Packaging Tape','Tapes & Adhesives',NULL,'PACK-003','Heavy-duty 2-inch clear tape for boxes.',89.00,NULL,10,NULL,NULL,'/sweepxpress/uploads/1765167590_693651e633a65.jpg','2025-09-06 14:52:25',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (4,'Latex Gloves (100 pcs)','Cleaning Supplies',NULL,'GLV100-004','Powder-free gloves for household cleaning.',299.00,NULL,10,NULL,NULL,'/sweepxpress/uploads/1765167733_6936527596dd0.jpg','2025-09-06 14:52:25',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (5,'3M Duct Tape','Tapes & Adhesives',NULL,'3MDT-005','Just a tape',99.00,NULL,10,NULL,NULL,'/sweepxpress/uploads/1765167223_693650773111b.jpg','2025-09-15 05:01:44',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (7,'3M Scotch Brite','Cleaning Supplies',NULL,'SB-007','a brand of cleaning and surface conditioning products, known for its non-woven abrasive pads and sponges made from synthetic fibers infused with abrasives like aluminum oxide or silicon carbide.',110.00,NULL,10,NULL,NULL,'/sweepxpress/assets/3M Scotch Brite.jpg','2025-09-15 09:21:09',1,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (8,'3M General Purpose Adhesive Cleaner','Cleaning Supplies',NULL,'3MAC-008','a solvent-based product designed to dissolve and remove sticky adhesive residue, grease, oil, wax, tar, and light paint overspray from various surfaces, including cured automotive paint, vinyl, and fabrics.',300.00,NULL,10,NULL,NULL,'/sweepxpress/assets/3M General Purpose Adhesive Cleaner.jpg','2025-09-15 09:21:09',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (9,'3M Gloves',NULL,NULL,'3MGLV-009','washable work gloves offering good dexterity, breathability, and grip for light to medium-duty tasks like material handling, small parts assembly, and general construction, featuring a nitrile or polyurethane foam-coated palm and a knit wrist cuff for comfort and a secure fit.',150.00,NULL,10,NULL,NULL,'/sweepxpress/assets/3M Gloves.jpg','2025-09-15 09:21:09',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (10,'3M Sharpshoote No Rinse Mark Remover','Cleaning Supplies',NULL,'3MSM-010','a ready-to-use, extra-strength cleaner designed to remove difficult stains, spots, and grease from a wide variety of hard, washable surfaces without requiring rinsing.',150.00,NULL,10,NULL,NULL,'/sweepxpress/assets/3M Sharpshoote No Rinse Mark Remover.jpg','2025-09-15 09:21:09',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (11,'3M Duct Tapes','Tapes & Adhesives',NULL,'3MDT2-011','a durable, cloth-backed tape with a strong adhesive designed for general-purpose applications like bundling, sealing, and repairs, and it comes in different strengths and features, such as water resistance and hand-tearability.',149.00,NULL,10,NULL,NULL,'/sweepxpress/assets/3M Duct Tapes.jpg','2025-09-15 09:21:09',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (12,'3M Sanitizer Concentrate','Cleaning Supplies',NULL,'3MSAN-012','an EPA-registered, concentrated liquid sanitizer for hard, non-porous surfaces, including food-contact surfaces in commercial settings.',149.00,NULL,10,NULL,NULL,'/sweepxpress/assets/3M Sanitizer Concentrate.jpg','2025-09-15 09:21:09',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (13,'Scotch-Brite Quick Clean Griddle Starting Kit','Cleaning Supplies',NULL,'SBQK-013','a complete set designed for fast, safe, and efficient cleaning of hot commercial griddles, using a powerful, Green Seal™-certified liquid cleaner to remove burnt-on food soil without strong odors or caustic soda.',149.00,NULL,10,NULL,NULL,'/sweepxpress/assets/Scotch-Brite Quick Clean Griddle Starting Kit.jpg','2025-09-15 09:21:09',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (14,'3M Solution Tablets','Cleaning Supplies',NULL,'3MTBL-014','EPA-registered, concentrated disinfectant tablets that, when dissolved in water, create a solution to kill a broad spectrum of microbes, including Clostridioides difficile (C. diff) spores, Norovirus, SARS-CoV-2, and various bacteria, on hard, non-porous surfaces.',200.00,NULL,10,NULL,NULL,'/sweepxpress/assets/3M Solution Tablets.jpg','2025-09-15 09:21:09',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (15,'3M Spray Buff','Cleaning Supplies',NULL,'3MSB-015','a milky-white, ready-to-use emulsion designed for spray buffing operations to quickly clean, polish, and restore the luster of floor finishes, especially 3M and high-quality synthetic finishes.',90.00,NULL,10,NULL,NULL,'/sweepxpress/assets/3M Spray Buff.jpg','2025-09-15 09:21:09',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (16,'3M Stainless Steel Cleaner and Polish','Cleaning Supplies',NULL,'3MSS-016','a ready-to-use aerosol product designed to clean and polish metal surfaces in a single step, leaving a high-gloss, streak-free finish.',180.00,NULL,10,NULL,NULL,'/sweepxpress/assets/3M Stainless Steel Cleaner and Polish.jpg','2025-09-15 09:21:09',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (17,'3M Super Shine','Cleaning Supplies',NULL,'3MSSH-017','a floor finish that creates a durable, high-gloss, and protective layer on various hard floors, including ceramic tiles, vinyl, rubber, and terrazzo.',300.00,NULL,10,NULL,NULL,'/sweepxpress/assets/3M Super Shine.jpg','2025-09-15 09:21:09',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (18,'3M White Super Polish Pad 4100','Cleaning Supplies',NULL,'3MPD-018','a fine-grade, white, non-woven polyester fiber pad designed for light cleaning, buffing soft finishes, and polishing soft waxes on wood or other protected floors.',60.00,NULL,10,NULL,NULL,'/sweepxpress/assets/3M White Super Polish Pad 4100.jpg','2025-09-15 09:21:09',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (19,'3m-scotchgard-stone-floor-protector-plus-3-785-liter-bag','Floor Mats',NULL,'SGSP-019','a high-performance solution that hardens, seals, and protects porous stone floors like concrete, marble, and terrazzo by creating a durable, glossy, and scuff-resistant surface.',160.00,NULL,10,NULL,NULL,'/sweepxpress/assets/3m-scotchgard-stone-floor-protector-plus-3-785-liter-bag.avif','2025-09-15 09:21:09',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (20,'3M™ Nomad™ Scraper Matting 7150, Light Green','Floor Mats',NULL,'NMS-020','Durable vinyl-loops scrape, trap and hide dirt and moisture, minimizing re-tracking into the building',20.00,NULL,10,NULL,NULL,'/sweepxpress/assets/3M™ Nomad™ Scraper Matting 7150, Light Green.jpg','2025-09-15 09:21:09',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (21,'Karchar K 3 Power Control','Equipment',NULL,'KARCH-021','a mid-range electric pressure washer designed for home and garden use, featuring a Power Control spray gun with an LED display for selecting and monitoring pressure levels.',1100.00,NULL,10,NULL,NULL,'/sweepxpress/assets/Karchar K 3 Power Control.jpg','2025-09-15 09:21:09',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (22,'Karcher Bag-Less Powerful Vacuum Cleaner','Equipment',NULL,'KARCHV-022','provide consistent, high suction with multi-cyclone technology, eliminating the need for filter bags.',1500.00,NULL,10,NULL,NULL,'/sweepxpress/assets/Karcher Bag-Less Powerful Vacuum Cleaner.jpg','2025-09-15 09:21:09',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (23,'Plain 3M Nomad Z Web Mat','Floor Mats',NULL,'NMZW-023','a durable, all-vinyl floor mat having an open, continuously patterned surface.',50.00,NULL,10,NULL,NULL,'/sweepxpress/assets/Plain 3M Nomad Z Web Mat.webp','2025-09-15 09:21:09',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (24,'Scotch Brite Ultra Fine Hand Sanding','Tools & Accessories',NULL,'SBUF-024','a load-resistant, non-woven abrasive pad that uses silicon carbide to achieve a fine, uniform finish, effectively replacing steel wool without the risks of rust, splintering, or shredding.',20.00,NULL,10,NULL,NULL,'/sweepxpress/assets/Scotch Brite Ultra Fine Hand Sanding.jpg','2025-09-15 09:21:09',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (25,'ScotchBrite Grout Brush','Tools & Accessories',NULL,'SBGB-025','Easily clean in nooks and crannies with the Scotch-Brite Grout & Detail Brush. Its powerful non-scratch bristles are safe on grout, tile, bathroom fixtures, faucets, drains, and more! The Scotch-Brite® Grout & Detail Brush features antimicrobial bristle protection* that works to prevent bacterial odors. Get the most out of this durable, reusable brush with a thorough cleaning after use.',70.00,NULL,10,NULL,NULL,'/sweepxpress/assets/ScotchBrite Grout Brush.jpg','2025-09-15 09:21:09',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (26,'3M Carpet Map','Floor & Surface Care',NULL,'3MCM-026','A 3M carpet mat is an entrance mat designed to trap dirt and moisture, protecting indoor floors. These mats use dual-fiber construction (often nylon and polypropylene) to scrape, hide, and absorb dirt and water from footwear, keeping the interior clean and safe. Key features include durability for high-traffic areas, non-slip backing to prevent movement, and an easy-to-clean design that typically involves regular vacuuming',1200.00,NULL,10,NULL,NULL,'/sweepxpress/uploads/1762169135_6908912f37889.jpg','2025-10-15 16:38:09',0,NULL);
+INSERT IGNORE INTO `products` (`id`, `name`, `category`, `supplier_id`, `sku`, `description`, `price`, `cost_price`, `reorder_point`, `reorder_qty`, `image`, `image_path`, `created_at`, `stock`, `updated_at`) VALUES (40,'3M Floor Sealer','Floor & Surface Care',NULL,'3MFS-027','FOR FLOOR SHINING',600.00,NULL,10,NULL,NULL,'/sweepxpress/uploads/1764285620_3MFloorSealer1.jpg','2025-11-27 23:20:20',0,NULL);
+/*!40000 ALTER TABLE `products` ENABLE KEYS */;
+UNLOCK TABLES;
+
+LOCK TABLES `inventory` WRITE;
+/*!40000 ALTER TABLE `inventory` DISABLE KEYS */;
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (1,5,1,2598,'2026-08-08 11:59:40');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (2,11,1,1983,'2026-10-28 13:31:57');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (3,8,1,103,'2026-10-28 13:31:57');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (4,16,1,454,'2026-10-28 15:45:03');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (5,7,1,75,'2026-02-09 06:35:23');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (6,9,1,10,'2026-10-28 18:24:11');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (7,17,1,138,'2026-08-08 11:36:30');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (8,12,1,255,'2025-12-12 02:00:14');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (9,26,1,20,'2026-10-28 18:23:45');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (10,15,1,78,'2025-12-12 03:15:36');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (11,10,1,20,'2026-10-28 18:23:45');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (12,40,1,20,'2026-10-28 18:32:45');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (13,14,1,0,'2026-10-28 18:40:08');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (14,18,1,100,'2025-12-11 07:29:00');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (15,19,1,100,'2025-12-11 07:29:00');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (16,20,1,99,'2025-12-11 07:29:00');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (17,1,1,100,'2025-12-11 07:29:00');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (18,21,1,49,'2026-10-28 15:45:03');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (19,22,1,49,'2026-10-28 15:45:03');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (20,4,1,50,'2025-12-11 07:29:00');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (21,2,1,48,'2026-10-28 15:45:03');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (22,3,1,50,'2025-12-11 07:29:00');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (23,23,1,50,'2025-12-11 07:29:00');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (24,24,1,50,'2025-12-11 07:29:00');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (25,13,1,50,'2025-12-11 07:29:00');
+INSERT IGNORE INTO `inventory` (`id`, `product_id`, `location_id`, `quantity`, `updated_at`) VALUES (26,25,1,50,'2025-12-11 07:29:00');
+/*!40000 ALTER TABLE `inventory` ENABLE KEYS */;
+UNLOCK TABLES;
+
+LOCK TABLES `product_images` WRITE;
+/*!40000 ALTER TABLE `product_images` DISABLE KEYS */;
+INSERT IGNORE INTO `product_images` (`id`, `product_id`, `image_path`) VALUES (9,5,'/sweepxpress/uploads/1765167171_6936504386f6d.jpg');
+/*!40000 ALTER TABLE `product_images` ENABLE KEYS */;
+UNLOCK TABLES;
+/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
+
+/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
+/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
+

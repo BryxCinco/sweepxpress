@@ -7,7 +7,7 @@ require_once __DIR__ . '/includes/header.php';
     <header class="sx-legal-head">
         <span class="sx-eyebrow">Legal</span>
         <h1 class="sx-heading-lg">Terms and Conditions</h1>
-        <p>Last updated: May 5, 2025</p>
+        <p>Last updated: October 30, 2026</p>
         <nav class="sx-legal-tabs" aria-label="Legal pages">
             <a href="/sweepxpress/privacy.php" class="sx-chip">Privacy Policy</a>
             <a href="/sweepxpress/terms.php" class="sx-chip active" aria-current="page">Terms &amp; Conditions</a>
@@ -49,8 +49,8 @@ require_once __DIR__ . '/includes/header.php';
 
         <h2>6. Returns &amp; Refunds</h2>
         <ul>
-            <li><strong>No refunds</strong>; purchase carefully.</li>
-            <li>Items must be unused, in original packaging, and returned within <strong>[X] days</strong>.</li>
+            <li>Returns are accepted within <strong>7 days of delivery</strong> for <strong>damaged or incorrect items</strong>.</li>
+            <li>Refunds will be processed within <strong>5-7 business days</strong> after the item is received.</li>
         </ul>
 
         <h2>7. Intellectual Property</h2>

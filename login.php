@@ -8,11 +8,26 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/email_utility.php';
 require_once __DIR__ . '/includes/log_helper.php'; // FIXED: Added logError function include
 
+// Demo accounts (README, database/demo/accounts.sql): walang totoong mailbox ang tatlong demo address, kaya
+// walang OTP kapag DEMO_MODE=1 sa .env. Tatlong eksaktong email lang, at laging patay kung walang DEMO_MODE=1.
+// HUWAG buksan ang DEMO_MODE sa site na may totoong customer.
+function sx_demo_login_allowed(string $email): bool
+{
+    return env('DEMO_MODE', '0') === '1'
+        && in_array(strtolower($email), ['admin@demo.sweepxpress.com', 'customer@demo.sweepxpress.com', 'business@demo.sweepxpress.com'], true);
+}
+
 // --- Initialize variables ---
 $msg = '';
 $login_error = '';
 $success = '';
 $show_otp = false;
+
+// Mensaheng iniwan ng google_callback.php (hal. suspendido ang account); isang beses lang ipapakita
+if (!empty($_SESSION['login_notice'])) {
+    $msg = (string)$_SESSION['login_notice'];
+    unset($_SESSION['login_notice']);
+}
 
 // Redirect if already logged in
 if (isset($_SESSION['user'])) {
@@ -64,7 +79,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['email']) && !isset($_
         $msg = "Too many login attempts. Please try again in 15 minutes.";
     } elseif ($email && $pass) {
         try {
-            $stmt = $pdo->prepare("SELECT id, name, role, email, password_hash, suspended_until FROM users WHERE email=? LIMIT 1");
+            $stmt = $pdo->prepare("SELECT id, name, username, profile_image, phone, role, email, password_hash, suspended_until FROM users WHERE email=? LIMIT 1");
             $stmt->execute([$email]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -73,6 +88,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['email']) && !isset($_
                 if (!empty($user['suspended_until']) && new DateTime() < new DateTime($user['suspended_until'])) {
                     $expiry_date = (new DateTime($user['suspended_until']))->format('F d, Y h:i A');
                     $msg = "Your account is suspended until $expiry_date";
+                    log_user_action($pdo, (int)$user['id'], 'LOGIN_BLOCKED', "Login refused: account suspended until $expiry_date");
+                } elseif (sx_demo_login_allowed($user['email'])) {
+                    // Demo account: diretso na, walang OTP
+                    $_SESSION['user'] = [
+                        'id' => $user['id'],
+                        'name' => $user['name'],
+                        'username' => $user['username'] ?? '',
+                        'profile_image' => $user['profile_image'] ?? null,
+                        'phone' => $user['phone'] ?? '',
+                        'role' => $user['role'],
+                        'email' => $user['email']
+                    ];
+                    log_user_action($pdo, (int)$user['id'], 'LOGIN_SUCCESS', 'Signed in with password (demo account, no OTP)');
+                    header("Location: " . ($user['role'] === 'admin' ? "/sweepxpress/admin/dashboard.php" : "/sweepxpress/index.php"));
+                    exit;
                 } else {
                     // Generate OTP
                     $otp = random_int(100000, 999999);
@@ -94,6 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['email']) && !isset($_
                 // Maling email/password lang ang binibilang (hindi ang matagumpay na login)
                 rate_limit_record($pdo, 'login_fail_ip');
                 rate_limit_record($pdo, 'login_fail_email', $emailKey);
+                if ($user) log_user_action($pdo, (int)$user['id'], 'LOGIN_FAILURE', 'Wrong password');
                 $msg = "Invalid email or password.";
             }
         } catch (Exception $e) {
@@ -143,6 +174,7 @@ if (isset($_POST['verify_otp'])) {
                             'role' => $u['role'],
                             'email' => $u['email']
                         ];
+                        log_user_action($pdo, (int)$u['id'], 'LOGIN_SUCCESS', 'Signed in with email and OTP');
 
                         // Admin → dashboard; lahat ng iba → homepage
                         header("Location: " . ($u['role'] === 'admin' ? "/sweepxpress/admin/dashboard.php" : "/sweepxpress/index.php"));
@@ -159,6 +191,7 @@ if (isset($_POST['verify_otp'])) {
                         $pdo->prepare("UPDATE users SET otp_code=NULL, otp_expires=NULL WHERE id=?")->execute([$uid]);
                         unset($_SESSION['pending_user_id'], $_SESSION['otp_last_sent'], $_SESSION['otp_attempts']);
                         $show_otp = false;
+                        log_user_action($pdo, (int)$uid, 'LOGIN_FAILURE', 'Too many wrong OTP codes');
                         $login_error = "Too many incorrect attempts. Please log in again.";
                     } else {
                         $login_error = "Incorrect OTP. Try again or resend.";

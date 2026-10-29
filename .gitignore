@@ -1,5 +1,3 @@
-# Ignore sensitive config file
-config_oauth.php
 vendor/
 vendor.zip
 .env
@@ -11,6 +9,9 @@ node_modules/
 *.sql
 # Exception: schema migrations lang (walang customer data)
 !database/migrations/*.sql
+# Schema (istruktura lang) at demo data (walang customer data)
+!database/schema.sql
+!database/demo/*.sql
 
 # User-uploaded personal photos (personal data)
 uploads/profiles/*

@@ -1,5 +1,6 @@
 <?php
 require_once 'config.php';
+require_once __DIR__ . '/includes/log_helper.php';
 
 use League\OAuth2\Client\Provider\Google;
 
@@ -46,6 +47,16 @@ $stmt = $pdo->prepare("SELECT * FROM users WHERE google_id = ? OR email = ?");
 $stmt->execute([$google_id, $email]);
 $existingUser = $stmt->fetch(PDO::FETCH_ASSOC); // Ensure array keys are strings
 
+// Suspendido? Hindi puwedeng pumasok sa pamamagitan ng Google (parehong patakaran ng login.php).
+// Ginagawa ito BAGO ang anumang pag-update sa account o pag-set ng session.
+if ($existingUser && !empty($existingUser['suspended_until']) && new DateTime() < new DateTime($existingUser['suspended_until'])) {
+    $until = (new DateTime($existingUser['suspended_until']))->format('F d, Y h:i A');
+    log_user_action($pdo, (int)$existingUser['id'], 'LOGIN_BLOCKED', "Google sign-in refused: account suspended until $until");
+    $_SESSION['login_notice'] = "Your account is suspended until $until";
+    header('Location: /sweepxpress/login.php');
+    exit;
+}
+
 $redirectUrl = "/sweepxpress/index.php"; // Default redirect for regular users
 
 if ($existingUser) {
@@ -72,6 +83,8 @@ if ($existingUser) {
         'role'      => $existingUser['role']
     ];
     
+    log_user_action($pdo, (int)$existingUser['id'], 'LOGIN_SUCCESS', 'Signed in with Google');
+
     // Check if the existing user is an admin
     if ($existingUser['role'] === 'admin') {
         $redirectUrl = "/sweepxpress/admin/dashboard.php";
@@ -94,6 +107,7 @@ if ($existingUser) {
         'google_id' => $google_id,
         'role'      => $role
     ];
+    log_user_action($pdo, (int)$newUserId, 'LOGIN_SUCCESS', 'Signed in with Google (new account)');
     // No need to check for admin role here as new users default to 'customer'
 }
 
