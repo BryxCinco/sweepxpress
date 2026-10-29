@@ -202,7 +202,8 @@
 
     function ask(question) {
         question = (question || '').trim();
-        if (!ready || busy || !question) return;
+        if (!ready) { open(); return; }   // ipakita ang paalala sa panel kung wala pang key
+        if (busy || !question) return;
         open();
         var history = messages.filter(function (m) { return m.role !== 'error'; }).slice(-HISTORY)
             .map(function (m) { return { role: m.role, content: m.content }; });
@@ -258,6 +259,14 @@
 
     // Para sa ibang bahagi ng admin (hal. "Daily brief" sa dashboard)
     window.sxCopilot = { open: open, close: close, ask: ask };
+
+    // Mga buton kahit saan sa pahina: data-cp-ask="tanong" ay nagtatanong, data-cp-open ay nagbubukas lang
+    document.addEventListener('click', function (e) {
+        var t = e.target.closest ? e.target.closest('[data-cp-ask], [data-cp-open]') : null;
+        if (!t) return;
+        e.preventDefault();
+        if (t.hasAttribute('data-cp-ask')) ask(t.getAttribute('data-cp-ask')); else open();
+    });
 
     render();
 }());

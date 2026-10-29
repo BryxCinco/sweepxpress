@@ -326,6 +326,14 @@ require_once __DIR__ . '/../includes/header.php';
 .db-ok { display: grid; place-items: center; gap: var(--sx-space-2); padding: var(--sx-space-6) 0; color: var(--sx-accent-dark); text-align: center; }
 .db-ok i { font-size: 1.6rem; }
 
+/* Copilot strip (Phase 8e-4) */
+.db-ai { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sx-space-4); }
+.db-ai-logo { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; border-radius: var(--sx-radius-md); background: var(--sx-gradient-brand); color: #fff; font-size: 1.1rem; }
+.db-ai-text { flex: 1 1 260px; min-width: 0; }
+.db-ai-text h2 { margin: 0; font-size: var(--sx-text-base); font-weight: var(--sx-weight-extrabold); color: var(--sx-dark); }
+.db-ai-text p { margin: 2px 0 0; font-size: var(--sx-text-sm); color: var(--sx-muted); }
+.db-ai-actions { display: flex; flex-wrap: wrap; gap: var(--sx-space-2); }
+
 /* ---- Bento placement ---- */
 @media (min-width: 768px) {
     .db-bento {
@@ -334,6 +342,7 @@ require_once __DIR__ . '/../includes/header.php';
             "hero    hero"
             "attn    attn"
             "inv     supply"
+            "ai      ai"
             "rev     rev"
             "status  people"
             "flow    top"
@@ -347,6 +356,7 @@ require_once __DIR__ . '/../includes/header.php';
         grid-template-areas:
             "hero    hero    attn    attn"
             "hero    hero    inv     supply"
+            "ai      ai      ai      ai"
             "rev     rev     rev     status"
             "flow    flow    top     top"
             "orders  orders  orders  people"
@@ -354,7 +364,7 @@ require_once __DIR__ . '/../includes/header.php';
     }
 }
 @media (min-width: 768px) {
-    .db-hero { grid-area: hero; } .db-a-attn { grid-area: attn; } .db-a-inv { grid-area: inv; } .db-a-supply { grid-area: supply; }
+    .db-hero { grid-area: hero; } .db-a-attn { grid-area: attn; } .db-a-inv { grid-area: inv; } .db-a-supply { grid-area: supply; } .db-a-ai { grid-area: ai; }
     .db-a-rev { grid-area: rev; } .db-a-status { grid-area: status; } .db-a-flow { grid-area: flow; } .db-a-top { grid-area: top; }
     .db-a-orders { grid-area: orders; } .db-a-people { grid-area: people; } .db-a-restock { grid-area: restock; }
     .db-attn { grid-template-columns: repeat(4, 1fr); }
@@ -363,6 +373,7 @@ require_once __DIR__ . '/../includes/header.php';
 @media (min-width: 1400px) { .db-attn { grid-template-columns: repeat(4, 1fr); } }
 </style>
 
+<?php $copilotReady = trim((string)env('GROQ_API_KEY', '')) !== ''; ?>
 <div class="db sx-container">
     <div class="db-head">
         <div>
@@ -444,6 +455,23 @@ require_once __DIR__ . '/../includes/header.php';
             <div class="db-chips">
                 <a href="/sweepxpress/admin/purchase_orders.php?tab=sent"><span>Arriving this week</span><strong><?= number_format($supply['arriving']) ?></strong></a>
                 <a href="/sweepxpress/admin/purchase_orders.php" class="<?= $supply['late'] ? 'bad' : '' ?>"><span>Late deliveries</span><strong><?= number_format($supply['late']) ?></strong></a>
+            </div>
+        </section>
+
+        <!-- Copilot -->
+        <section class="sx-card db-card db-a-ai" aria-label="Copilot">
+            <div class="db-ai">
+                <span class="db-ai-logo" aria-hidden="true"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
+                <div class="db-ai-text">
+                    <h2>Copilot</h2>
+                    <p><?= $copilotReady ? 'Ask in plain English or Tagalog. It reads your stock, sales and suppliers, and changes nothing.' : 'Not set up yet. Add GROQ_API_KEY to the .env file (see docs/admin-copilot.md).' ?></p>
+                </div>
+                <div class="db-ai-actions">
+                    <button type="button" class="sx-btn sx-btn-primary sx-btn-sm" data-cp-ask="Give me today's brief"><i class="fa-solid fa-newspaper"></i> Daily brief</button>
+                    <button type="button" class="sx-btn sx-btn-outline sx-btn-sm" data-cp-ask="What should I reorder today?"><i class="fa-solid fa-cart-flatbed"></i> What to reorder</button>
+                    <button type="button" class="sx-btn sx-btn-outline sx-btn-sm" data-cp-ask="Which purchase orders are overdue and which supplier is the least reliable?"><i class="fa-solid fa-truck-field"></i> Late suppliers</button>
+                    <button type="button" class="sx-btn sx-btn-ghost sx-btn-sm" data-cp-open>Ask something else</button>
+                </div>
             </div>
         </section>
 
