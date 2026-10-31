@@ -53,6 +53,9 @@ try {
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         ]
     );
+    // Pareho ang oras ng database at PHP (Asia/Manila, walang DST). Kung hindi, "OTP expired" agad
+    // sa host na iba ang timezone ng database (hal. -15 oras sa InfinityFree).
+    $pdo->exec("SET time_zone = '+08:00'");
 } catch (PDOException $e) {
     error_log("Database connection failed: " . $e->getMessage());
     http_response_code(500);
